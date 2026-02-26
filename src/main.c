@@ -128,12 +128,10 @@ int main(int argc, char **argv) {
     }
 
     /* ── 7. Interactive simulation loop ── */
-    TuiControl ctrl = { .state = TUI_PAUSED, .speed_ms = 100 };
+    TuiControl ctrl = { .state = TUI_RUNNING, .speed_ms = 100 };
 
-    /* In non-TUI (batch) mode, run without interactive controls */
-    if (!cfg.tui_enabled)
-        ctrl.state = TUI_RUNNING;
-    else if (rank == 0)
+    /* In TUI mode, try to enable raw-mode keyboard input on rank 0 */
+    if (cfg.tui_enabled && rank == 0)
         tui_init_interactive();
 
     double t_start = MPI_Wtime();

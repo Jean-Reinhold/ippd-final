@@ -49,6 +49,10 @@ void tui_restore_terminal(void) {
 void tui_init_interactive(void) {
     if (tui_raw_mode_active) return;
 
+    /* If stdin isn't a real terminal (e.g. mpirun without --stdin),
+     * skip raw mode — interactive keys won't work but rendering still will. */
+    if (!isatty(STDIN_FILENO)) return;
+
     tcgetattr(STDIN_FILENO, &tui_orig_termios);
     atexit(tui_restore_terminal);
 
