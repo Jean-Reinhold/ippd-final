@@ -156,78 +156,40 @@ cell.resource += rate * (max_resource - cell.resource)
 
 ## Modelo de Paralelismo
 
-A simulação usa um modelo híbrido MPI+OpenMP: MPI distribui a grade entre processos (paralelismo de dados em memória distribuída) e OpenMP paraleliza o processamento de agentes e a atualização da grade dentro de cada processo (paralelismo de dados em memória compartilhada). As decisões de projeto para cada componente são justificadas abaixo.
+Modelo híbrido MPI+OpenMP: MPI distribui a grade entre processos e OpenMP paraleliza agentes e atualização da grade dentro de cada processo.
 
 ### Decomposição MPI 2D Cartesiana
 
-A grade global é dividida em uma topologia cartesiana 2D (`MPI_Cart_create`). Cada rank MPI recebe um bloco contíguo da grade com uma borda de halo de 1 célula em cada lado para acesso aos vizinhos.
+A grade é dividida em topologia cartesiana 2D (`MPI_Cart_create`), não-periódica. Cada rank recebe um bloco com halo de 1 célula. A decomposição 2D minimiza superfície de halo vs. 1D strips. O `partition_init` escolhe a fatoração de P que minimiza `|px - py|` para manter sub-grades aproximadamente quadradas.
 
-**Por que 2D ao invés de 1D (strips)?** A decomposição 2D minimiza a razão superfície/volume: para uma grade *N×N* dividida em *P* ranks, a decomposição 1D (strips horizontais) gera bordas de tamanho *N* por rank, enquanto a 2D gera bordas de tamanho *2(N/√P)* — significativamente menor para *P > 4*. Menos superfície = menos dados a trocar nos halos.
+### Troca de halos
 
-**Por que não-periódica?** A grade não é toroidal (`periods = {0, 0}`). Ranks nas bordas enviam halos para `MPI_PROC_NULL`, que é um no-op do MPI. Isso simplifica o código sem impor condições de contorno artificiais ao modelo ecológico.
-
-**Balanceamento da grade de processos**: o `partition_init` tenta encontrar a fatoração de *P* que minimiza `|px - py|`, atribuindo o fator maior à dimensão espacial maior. Isso mantém as sub-grades aproximadamente quadradas, minimizando o perímetro de halo relativo à área.
-
-### Troca de halos — comunicação não-bloqueante
-
-Comunicação de 8 direções (N, S, E, W, NE, NW, SE, SW) usando `MPI_Isend`/`MPI_Irecv` seguidos de um único `MPI_Waitall` sobre todos os 16 requests.
-
-**Por que não-bloqueante?** Com `Isend`/`Irecv`, as 8 transferências são postadas de uma vez e podem progredir em paralelo dentro da rede. Se usássemos `Send`/`Recv` sequenciais, cada direção bloquearia até o matching receive estar pronto, serializando a comunicação.
-
-**Por que um MPI_Datatype customizado?** A struct `Cell` tem campos de tipos mistos (int, double). O `halo_cell_type()` cria um `MPI_Type_create_struct` que mapeia os offsets exatos da struct, permitindo enviar `Cell` diretamente sem serialização manual.
-
-**Colunas empacotadas**: linhas são contíguas na memória (row-major), então bordas Norte/Sul podem ser enviadas diretamente do buffer. Bordas Leste/Oeste não são contíguas — são empacotadas em buffers temporários via `pack_column`/`unpack_column`.
+8 direções (N, S, E, W, NE, NW, SE, SW) com `MPI_Isend`/`MPI_Irecv` + `MPI_Waitall`. Um `MPI_Datatype` customizado mapeia a struct `Cell` diretamente. Bordas E/W são empacotadas manualmente (`pack_column`/`unpack_column`) por não serem contíguas em row-major.
 
 ### Processamento de agentes — OpenMP `dynamic`
 
-```c
-#pragma omp parallel
-{
-    RngState rng = rng_seed(seed ^ thread_id);  // PRNG per-thread
-    #pragma omp for schedule(dynamic, 32)
-    for (int i = 0; i < count; i++) { ... }
-}
-```
+O processamento é dividido em duas funções independentemente cronometradas:
 
-**Por que `schedule(dynamic, 32)` ao invés de `static`?** A carga sintética (`workload_compute`) faz com que agentes em células ricas custem até 500.000 iterações, enquanto agentes em células pobres custam quase zero. Com `static`, uma thread poderia receber todos os agentes "pesados" e virar gargalo. `dynamic` redistribui chunks de 32 agentes conforme as threads terminam, equilibrando a carga.
+1. **`agents_workload`** — busy-loop sintético proporcional ao recurso da célula. `schedule(dynamic, 32)` porque a carga varia de 0 a 500k iterações por agente; `static` deixaria threads desbalanceadas.
+2. **`agents_decide_all`** — lógica de decisão com PRNG per-thread (`seed ^ (tid * 2654435761)`). Garante determinismo e independência entre threads.
 
-**Por que chunk size = 32?** Trade-off entre granularidade e overhead. Chunks muito pequenos (1) geram muitas chamadas ao scheduler OpenMP; chunks muito grandes (~count/nthreads) degeneram para `static`. O valor 32 oferece granularidade suficiente para absorver variação sem overhead excessivo.
+Chunk size 32: trade-off entre granularidade (absorver variação de carga) e overhead (menos chamadas ao scheduler que chunk=1).
 
-**PRNG per-thread**: cada thread inicializa seu `RngState` com `seed ^ (thread_id * constante)`. Isso garante: (a) determinismo — mesma seed + mesmo número de threads = mesmo resultado, (b) independência — nenhuma contenção entre threads por estado compartilhado, (c) qualidade — a constante multiplicativa (2654435761, o inverso da razão áurea em 32 bits) dispersa as seeds uniformemente.
+### Atualização da grade — `collapse(2) static`
 
-### Atualização da grade — OpenMP `collapse(2) static`
+`collapse(2)` transforma o espaço de iteração de `local_h` para `local_h × local_w`, evitando threads ociosas quando `local_h < nthreads`. `static` porque cada célula tem custo idêntico.
 
-```c
-#pragma omp parallel for collapse(2) schedule(static)
-for (int r = 1; r <= local_h; r++)
-    for (int c = 1; c <= local_w; c++) { ... }
-```
+### Migração — `MPI_Alltoallv`
 
-**Por que `collapse(2)`?** Sem collapse, o loop externo tem `local_h` iterações (e.g., 32 para 128/4). Se `local_h < nthreads`, algumas threads ficam ociosas. Com `collapse(2)`, o espaço de iteração é `local_h × local_w` (e.g., 32×32 = 1024), distribuindo trabalho muito melhor.
+Duas fases: (1) `MPI_Alltoall` de contagens, (2) `MPI_Alltoallv` de dados. O array local é compactado in-place após marcar migrantes e cresce com `realloc` amortizado.
 
-**Por que `static` aqui (ao contrário de `dynamic` nos agentes)?** A regeneração de cada célula tem custo idêntico (uma multiplicação + clamping), sem o workload variável dos agentes. `static` é ideal para loops regulares: zero overhead de scheduling, e a localidade de cache se beneficia de blocos contíguos por thread.
+### Métricas — `MPI_Allreduce`
 
-### Migração de agentes — `MPI_Alltoallv` em duas fases
+- `total_resource`, `alive_agents` → `MPI_SUM`
+- `max_energy` → `MPI_MAX`, `min_energy` → `MPI_MIN` (sentinela `DBL_MAX`)
+- `avg_energy` → soma local / total global de vivos
 
-Agentes que se movem para fora da partição local precisam ser transferidos ao rank correto. A migração acontece em duas fases:
-
-1. **Fase 1** — `MPI_Alltoall` de contagens: cada rank anuncia quantos agentes enviará a cada outro rank. Isso permite que os ranks receptores aloquem buffers de recepção do tamanho exato.
-2. **Fase 2** — `MPI_Alltoallv` de dados: transferência dos structs `Agent` usando um `MPI_Datatype` customizado, com contagens e deslocamentos variáveis por rank.
-
-**Por que `Alltoallv` ao invés de sends/recvs ponto-a-ponto?** O padrão de migração é all-to-all com contagens variáveis — cada rank pode enviar agentes para qualquer outro. `MPI_Alltoallv` é a primitiva exata para esse padrão, e implementações MPI otimizam ela internamente (tree algorithms, pipelining) melhor do que N² sends/recvs manuais.
-
-**Compactação do array local**: após marcar migrantes como `alive = 0`, o array é compactado in-place (O(n) scan), e os agentes recebidos são concatenados no final. O array cresce dinamicamente com `realloc` e capacidade que dobra para amortizar realocações.
-
-### Métricas globais — `MPI_Allreduce`
-
-Reduções coletivas via `MPI_Allreduce` (todos os ranks recebem o resultado):
-- `total_resource` → `MPI_SUM`
-- `alive_agents` → `MPI_SUM`
-- `max_energy` → `MPI_MAX`
-- `min_energy` → `MPI_MIN` (com sentinela `DBL_MAX` para ranks sem agentes, evitando contaminar o mínimo global)
-- `avg_energy` → soma local das energias reduzida com `MPI_SUM`, dividida pelo total global de vivos
-
-**Por que `Allreduce` ao invés de `Reduce`?** A TUI e decisões futuras podem precisar das métricas em qualquer rank. O custo extra sobre `Reduce` é mínimo (uma etapa de broadcast embutida).
+Os 9 campos de timing do `CyclePerf` são contíguos em memória, permitindo um único `MPI_Reduce` com `MPI_MAX` para obter os tempos do rank gargalo.
 
 ## Benchmarks
 
