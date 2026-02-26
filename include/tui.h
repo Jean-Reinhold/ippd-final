@@ -82,7 +82,8 @@ void tui_gather_agents(Agent *local_agents, int local_count,
  */
 void tui_render(Cell *full_grid, int global_w, int global_h,
                 Agent *all_agents, int total_agents,
-                int cycle, Season season, SimMetrics *metrics,
-                TuiControl *ctrl);
+                int cycle, int total_cycles,
+                Season season, SimMetrics *metrics,
+                CyclePerf *perf, TuiControl *ctrl);
 
 #endif /* TUI_H */

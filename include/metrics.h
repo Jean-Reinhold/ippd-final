@@ -12,6 +12,20 @@ typedef struct {
     int    alive_agents;
 } SimMetrics;
 
+/* Per-cycle performance breakdown for the TUI dashboard */
+typedef struct {
+    double cycle_time;      /* Total wall time for the cycle       */
+    double compute_time;    /* Agent processing + subgrid update   */
+    double halo_time;       /* Halo exchange                       */
+    double migrate_time;    /* Agent migration                     */
+    double metrics_time;    /* Metrics reduction                   */
+    double render_time;     /* TUI gather + render                 */
+    int    mpi_size;        /* Total MPI ranks                     */
+    int    omp_threads;     /* OMP threads per rank                */
+    double load_balance;    /* min_agents/max_agents across ranks  */
+    double comm_compute;    /* (halo+migrate+metrics)/compute      */
+} CyclePerf;
+
 /*
  * Compute local metrics from the subgrid and agent array.
  * Only sums resources over owned (interior) cells.
