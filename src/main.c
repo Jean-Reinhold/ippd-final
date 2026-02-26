@@ -18,7 +18,6 @@
 #include "metrics.h"
 #include "tui.h"
 
-/* ── Command-line argument parsing ── */
 static void parse_args(int argc, char **argv, SimConfig *cfg) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-w") == 0 && i + 1 < argc)
@@ -42,7 +41,6 @@ static void parse_args(int argc, char **argv, SimConfig *cfg) {
     }
 }
 
-/* ── Print usage ── */
 static void usage(const char *prog) {
     fprintf(stderr,
         "Usage: %s [options]\n"
@@ -62,7 +60,6 @@ static void usage(const char *prog) {
 }
 
 int main(int argc, char **argv) {
-    /* ── 1. MPI initialization ── */
     int provided;
     MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &provided);
     if (provided < MPI_THREAD_FUNNELED) {
@@ -76,11 +73,9 @@ int main(int argc, char **argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    /* ── 2. Parse configuration ── */
     SimConfig cfg = SIM_CONFIG_DEFAULTS;
     parse_args(argc, argv, &cfg);
 
-    /* Check for --help on rank 0 */
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--help") == 0) {
             if (rank == 0) usage(argv[0]);
@@ -103,34 +98,28 @@ int main(int argc, char **argv) {
         printf("=======================\n");
     }
 
-    /* ── 3. Initialize partition (Cartesian decomposition) ── */
     Partition partition;
     partition_init(&partition, cfg.global_w, cfg.global_h, MPI_COMM_WORLD);
 
-    /* ── 4. Create and initialize subgrid ── */
     SubGrid sg;
     subgrid_create(&sg, &partition, cfg.global_w, cfg.global_h);
     subgrid_init(&sg, &partition, cfg.seed);
 
-    /* ── 5. Initialize agents ── */
     int agent_count = 0;
-    int agent_capacity = cfg.num_agents * 2;  /* room for migration */
+    int agent_capacity = cfg.num_agents * 2;
     Agent *agents = malloc(sizeof(Agent) * (size_t)agent_capacity);
     agents_init(agents, &agent_count, cfg.num_agents,
                 &sg, &partition, cfg.global_w, cfg.global_h,
                 cfg.initial_energy, cfg.seed);
 
-    /* ── 6. Allocate TUI buffers (rank 0 only) ── */
     Cell *full_grid = NULL;
     if (rank == 0 && cfg.tui_enabled) {
         full_grid = malloc(sizeof(Cell) *
                            (size_t)cfg.global_w * (size_t)cfg.global_h);
     }
 
-    /* ── 7. Interactive simulation loop ── */
     TuiControl ctrl = { .state = TUI_RUNNING, .speed_ms = 100 };
 
-    /* In TUI mode, try to enable raw-mode keyboard input on rank 0 */
     if (cfg.tui_enabled && rank == 0)
         tui_init_interactive();
 
@@ -142,20 +131,16 @@ int main(int argc, char **argv) {
     while (cycle < cfg.total_cycles && ctrl.state != TUI_QUIT) {
         int step_requested = 0;
 
-        /* 7.1 — Rank 0 polls keyboard input (TUI mode only) */
         if (rank == 0 && cfg.tui_enabled)
             step_requested = tui_poll_input(&ctrl);
 
-        /* 7.2 — Broadcast control state to all ranks */
         MPI_Bcast(&ctrl, sizeof(ctrl), MPI_BYTE, 0, partition.cart_comm);
         MPI_Bcast(&step_requested, 1, MPI_INT, 0, partition.cart_comm);
 
         if (ctrl.state == TUI_QUIT) break;
 
-        /* 7.3 — Handle paused state */
         if (ctrl.state == TUI_PAUSED && !step_requested) {
             if (rank == 0 && cfg.tui_enabled) {
-                /* Render current state while paused so controls bar is visible */
                 tui_gather_grid(&sg, &partition, full_grid,
                                 cfg.global_w, cfg.global_h,
                                 partition.cart_comm);
@@ -180,7 +165,7 @@ int main(int argc, char **argv) {
                 free(all_agents);
                 usleep(50000); /* 50ms poll interval to avoid busy-wait */
             } else {
-                /* Non-zero ranks still participate in collective calls */
+                /* Ranks não-zero participam das chamadas coletivas mesmo em pausa. */
                 tui_gather_grid(&sg, &partition, NULL,
                                 cfg.global_w, cfg.global_h,
                                 partition.cart_comm);
@@ -199,11 +184,9 @@ int main(int argc, char **argv) {
             continue;
         }
 
-        /* ── Execute one simulation cycle ── */
         double t_cycle_start = MPI_Wtime();
         CyclePerf local_perf = {0};
 
-        /* 7.4 — Season update + broadcast + update cell accessibility */
         Season season = season_for_cycle(cycle, cfg.season_length);
         MPI_Bcast(&season, 1, MPI_INT, 0, partition.cart_comm);
 
@@ -214,28 +197,23 @@ int main(int argc, char **argv) {
             }
         }
 
-        /* 7.5 — Halo exchange */
         double t0 = MPI_Wtime();
         halo_exchange(&sg, &partition);
         local_perf.halo_time = MPI_Wtime() - t0;
 
-        /* 7.6 — Agent processing (decision-making + workload) */
         t0 = MPI_Wtime();
         agents_process(agents, agent_count, &sg, season,
                        cfg.max_workload, cfg.seed,
                        cfg.energy_gain, cfg.energy_loss);
 
-        /* 7.8 — Subgrid resource update (regeneration) */
         subgrid_update(&sg, season);
         local_perf.compute_time = MPI_Wtime() - t0;
 
-        /* 7.7 — Agent migration between ranks */
         t0 = MPI_Wtime();
         migrate_agents(&agents, &agent_count, &agent_capacity,
                        &partition, &sg, cfg.global_w, cfg.global_h);
         local_perf.migrate_time = MPI_Wtime() - t0;
 
-        /* 7.9 — Metrics */
         t0 = MPI_Wtime();
         SimMetrics local_metrics, global_metrics;
         metrics_compute_local(&sg, agents, agent_count, &local_metrics);
@@ -243,7 +221,6 @@ int main(int argc, char **argv) {
                               partition.cart_comm);
         local_perf.metrics_time = MPI_Wtime() - t0;
 
-        /* 7.10 — TUI rendering (rank 0 only, at intervals) */
         int do_render = cfg.tui_enabled &&
             (cycle % cfg.tui_interval == 0 ||
              cycle == cfg.total_cycles - 1);
@@ -263,7 +240,7 @@ int main(int argc, char **argv) {
                 local_perf.render_time = MPI_Wtime() - t0;
                 local_perf.cycle_time = MPI_Wtime() - t_cycle_start;
 
-                /* Reduce perf data: MPI_MAX for timings (bottleneck rank) */
+                /* MPI_MAX nos tempos: o rank gargalo define o tempo real do ciclo. */
                 CyclePerf global_perf = {0};
                 MPI_Reduce(&local_perf.cycle_time,   &global_perf.cycle_time,
                            1, MPI_DOUBLE, MPI_MAX, 0, partition.cart_comm);
@@ -278,7 +255,6 @@ int main(int argc, char **argv) {
                 MPI_Reduce(&local_perf.render_time,   &global_perf.render_time,
                            1, MPI_DOUBLE, MPI_MAX, 0, partition.cart_comm);
 
-                /* Load balance: min/max agent count across ranks */
                 int min_agents, max_agents;
                 MPI_Reduce(&agent_count, &min_agents, 1, MPI_INT,
                            MPI_MIN, 0, partition.cart_comm);
@@ -306,6 +282,7 @@ int main(int argc, char **argv) {
                 free(all_agents);
                 usleep((unsigned int)(ctrl.speed_ms * 1000));
             } else {
+                /* Ranks não-zero participam dos gathers e reduções de perf. */
                 tui_gather_grid(&sg, &partition, NULL,
                                 cfg.global_w, cfg.global_h,
                                 partition.cart_comm);
@@ -318,7 +295,6 @@ int main(int argc, char **argv) {
                 local_perf.render_time = MPI_Wtime() - t0;
                 local_perf.cycle_time = MPI_Wtime() - t_cycle_start;
 
-                /* Non-zero ranks participate in perf reductions */
                 CyclePerf global_perf = {0};
                 MPI_Reduce(&local_perf.cycle_time,   &global_perf.cycle_time,
                            1, MPI_DOUBLE, MPI_MAX, 0, partition.cart_comm);
@@ -346,11 +322,9 @@ int main(int argc, char **argv) {
 
     double t_end = MPI_Wtime();
 
-    /* Restore terminal before printing final output */
     if (rank == 0 && cfg.tui_enabled)
         tui_restore_terminal();
 
-    /* ── 8. Final output ── */
     if (rank == 0) {
         SimMetrics final_local, final_global;
         metrics_compute_local(&sg, agents, agent_count, &final_local);
@@ -366,14 +340,13 @@ int main(int argc, char **argv) {
         printf("Min energy:     %.3f\n", final_global.min_energy);
         printf("===========================\n");
     } else {
-        /* Non-zero ranks still participate in the final reduce */
+        /* Ranks não-zero participam da redução final. */
         SimMetrics final_local, final_global;
         metrics_compute_local(&sg, agents, agent_count, &final_local);
         metrics_reduce_global(&final_local, &final_global,
                               partition.cart_comm);
     }
 
-    /* ── 9. Cleanup ── */
     free(agents);
     free(full_grid);
     subgrid_destroy(&sg);

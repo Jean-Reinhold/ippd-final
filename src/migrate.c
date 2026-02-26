@@ -7,13 +7,8 @@
 #include <string.h>
 #include <stddef.h>
 
-/* Defined in partition.c (created by another teammate) */
 extern int partition_rank_for_global(const Partition *p, int gx, int gy,
                                      int global_w, int global_h);
-
-/* ────────────────────────────────────────────────────────────────────────── *
- * MPI Datatype for Agent                                                    *
- * ────────────────────────────────────────────────────────────────────────── */
 
 MPI_Datatype migrate_agent_type(void)
 {
@@ -35,20 +30,14 @@ MPI_Datatype migrate_agent_type(void)
     return dt;
 }
 
-/* ────────────────────────────────────────────────────────────────────────── *
- * migrate_agents — Two-phase all-to-all migration                           *
- * ────────────────────────────────────────────────────────────────────────── *
- *                                                                           *
- * Phase 1: Scan local agents and partition into staying / migrating.        *
- *          Group migrating agents by destination rank.                      *
- *          Exchange per-rank counts with MPI_Alltoall.                      *
- *                                                                           *
- * Phase 2: Exchange Agent structs via MPI_Alltoallv with computed           *
- *          displacement arrays.                                             *
- *                                                                           *
- * Finally, compact the local array: remove migrated agents, append          *
- * received agents.                                                          *
- * ────────────────────────────────────────────────────────────────────────── */
+/*
+ * Migração all-to-all em duas fases:
+ *   Fase 1 — classifica agentes em locais/migrantes, agrupa por rank
+ *            destino, troca contagens via MPI_Alltoall.
+ *   Fase 2 — troca structs Agent via MPI_Alltoallv.
+ * Ao final, compacta o array local removendo migrantes e
+ * anexando os agentes recebidos.
+ */
 
 void migrate_agents(Agent **agents, int *count, int *capacity,
                     Partition *p, SubGrid *sg,
@@ -57,7 +46,6 @@ void migrate_agents(Agent **agents, int *count, int *capacity,
     const int nprocs  = p->size;
     const int my_rank = p->rank;
 
-    /* Region owned by this rank (global coordinates, inclusive) */
     const int x0 = sg->offset_x;
     const int y0 = sg->offset_y;
     const int x1 = x0 + sg->local_w - 1;
@@ -66,12 +54,8 @@ void migrate_agents(Agent **agents, int *count, int *capacity,
     Agent *ag    = *agents;
     int    n     = *count;
 
-    /* ── Phase 0: classify agents ─────────────────────────────────────── */
-
-    /* send_counts[r] = number of agents migrating to rank r */
     int *send_counts = calloc(nprocs, sizeof(int));
 
-    /* Temporary per-rank lists (indices into the agent array) */
     int **per_rank_idx = calloc(nprocs, sizeof(int *));
     int  *per_rank_cap = calloc(nprocs, sizeof(int));
 
@@ -84,20 +68,17 @@ void migrate_agents(Agent **agents, int *count, int *capacity,
         int gy = ag[i].gy;
 
         if (gx >= x0 && gx <= x1 && gy >= y0 && gy <= y1) {
-            /* Agent stays */
             stay_count++;
             continue;
         }
 
-        /* Agent must migrate */
         int dest = partition_rank_for_global(p, gx, gy, global_w, global_h);
         if (dest == my_rank) {
-            /* Edge case: still local (shouldn't happen normally) */
+            /* Caso raro: partition_rank_for_global pode retornar o próprio rank em bordas. */
             stay_count++;
             continue;
         }
 
-        /* Add to per-rank list */
         if (send_counts[dest] >= per_rank_cap[dest]) {
             per_rank_cap[dest] = per_rank_cap[dest] ? per_rank_cap[dest] * 2 : 8;
             per_rank_idx[dest] = realloc(per_rank_idx[dest],
@@ -107,13 +88,10 @@ void migrate_agents(Agent **agents, int *count, int *capacity,
         send_counts[dest]++;
     }
 
-    /* ── Phase 1: exchange counts ─────────────────────────────────────── */
-
     int *recv_counts = malloc(sizeof(int) * nprocs);
     MPI_Alltoall(send_counts, 1, MPI_INT,
                  recv_counts, 1, MPI_INT, p->cart_comm);
 
-    /* Build displacement arrays for MPI_Alltoallv */
     int *send_displs = malloc(sizeof(int) * nprocs);
     int *recv_displs = malloc(sizeof(int) * nprocs);
 
@@ -125,11 +103,8 @@ void migrate_agents(Agent **agents, int *count, int *capacity,
         total_recv += recv_counts[r];
     }
 
-    /* ── Phase 2: exchange agent data ─────────────────────────────────── */
-
     MPI_Datatype agent_t = migrate_agent_type();
 
-    /* Pack send buffer in rank order */
     Agent *send_buf = malloc(sizeof(Agent) * (total_send > 0 ? total_send : 1));
     int pos = 0;
     for (int r = 0; r < nprocs; r++) {
@@ -144,16 +119,12 @@ void migrate_agents(Agent **agents, int *count, int *capacity,
                   recv_buf, recv_counts, recv_displs, agent_t,
                   p->cart_comm);
 
-    /* ── Compact local array: keep staying agents, append received ───── */
-
-    /* Mark migrated agents as dead so we can filter them out */
     for (int r = 0; r < nprocs; r++) {
         for (int j = 0; j < send_counts[r]; j++) {
             ag[per_rank_idx[r][j]].alive = 0;
         }
     }
 
-    /* Compact: move alive agents to the front */
     int write_idx = 0;
     for (int i = 0; i < n; i++) {
         if (ag[i].alive) {
@@ -163,7 +134,6 @@ void migrate_agents(Agent **agents, int *count, int *capacity,
         }
     }
 
-    /* Ensure capacity for received agents */
     int new_count = write_idx + total_recv;
     if (new_count > *capacity) {
         int new_cap = *capacity;
@@ -174,11 +144,9 @@ void migrate_agents(Agent **agents, int *count, int *capacity,
         *capacity = new_cap;
     }
 
-    /* Append received agents */
     memcpy(&ag[write_idx], recv_buf, sizeof(Agent) * total_recv);
     *count = new_count;
 
-    /* ── Cleanup ──────────────────────────────────────────────────────── */
     MPI_Type_free(&agent_t);
     free(send_buf);
     free(recv_buf);

@@ -3,17 +3,17 @@
 
 #include "types.h"
 
-/* Determine the season for a given simulation cycle. */
+/* Determina a estação para um dado ciclo de simulação. */
 Season season_for_cycle(int cycle, int season_length);
 
 /*
- * Check whether a cell type is accessible in the given season.
- * Returns 1 if accessible, 0 otherwise.
+ * Verifica se um tipo de célula é acessível na estação dada.
+ * Retorna 1 se acessível, 0 caso contrário.
  */
 int season_accessibility(CellType type, Season s);
 
 /*
- * Get the resource regeneration rate for a cell type in the given season.
+ * Retorna a taxa de regeneração de recurso para um tipo de célula na estação dada.
  */
 double season_regen_rate(CellType type, Season s);
 

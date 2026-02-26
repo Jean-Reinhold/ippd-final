@@ -3,7 +3,7 @@
 
 #include "types.h"
 
-/* Aggregated simulation metrics */
+/* Métricas agregadas da simulação */
 typedef struct {
     double total_resource;
     double avg_energy;
@@ -12,37 +12,37 @@ typedef struct {
     int    alive_agents;
 } SimMetrics;
 
-/* Per-cycle performance breakdown for the TUI dashboard */
+/* Desempenho por ciclo para o dashboard TUI */
 typedef struct {
-    double cycle_time;      /* Total wall time for the cycle       */
-    double compute_time;    /* Agent processing + subgrid update   */
-    double halo_time;       /* Halo exchange                       */
-    double migrate_time;    /* Agent migration                     */
-    double metrics_time;    /* Metrics reduction                   */
-    double render_time;     /* TUI gather + render                 */
-    int    mpi_size;        /* Total MPI ranks                     */
-    int    omp_threads;     /* OMP threads per rank                */
-    double load_balance;    /* min_agents/max_agents across ranks  */
-    double comm_compute;    /* (halo+migrate+metrics)/compute      */
+    double cycle_time;
+    double compute_time;
+    double halo_time;
+    double migrate_time;
+    double metrics_time;
+    double render_time;
+    int    mpi_size;
+    int    omp_threads;
+    double load_balance;
+    double comm_compute;
 } CyclePerf;
 
 /*
- * Compute local metrics from the subgrid and agent array.
- * Only sums resources over owned (interior) cells.
+ * Calcula métricas locais a partir da sub-grade e do array de agentes.
+ * Soma recursos apenas sobre as células interiores (sem halo).
  */
 void metrics_compute_local(const SubGrid *sg, const Agent *agents,
                            int count, SimMetrics *local);
 
 #ifdef USE_MPI
 /*
- * Reduce local metrics across all ranks into global metrics.
+ * Reduz métricas locais de todos os ranks em métricas globais.
  *
- * Reductions:
+ * Reduções:
  *   total_resource → MPI_SUM
  *   alive_agents   → MPI_SUM
  *   max_energy     → MPI_MAX
  *   min_energy     → MPI_MIN
- *   avg_energy     → (SUM of energy_sums) / (SUM of alive counts)
+ *   avg_energy     → (soma das energias) / (soma dos vivos)
  */
 void metrics_reduce_global(const SimMetrics *local, SimMetrics *global,
                            MPI_Comm comm);

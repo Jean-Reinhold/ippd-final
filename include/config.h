@@ -3,7 +3,6 @@
 
 #include "types.h"
 
-/* ── Compile-time defaults for the simulation ── */
 #define DEFAULT_GLOBAL_W        64
 #define DEFAULT_GLOBAL_H        64
 #define DEFAULT_TOTAL_CYCLES    100
@@ -18,7 +17,6 @@
 #define DEFAULT_TUI_ENABLED     1
 #define DEFAULT_TUI_INTERVAL    1
 
-/* Convenience initializer for SimConfig with all defaults */
 #define SIM_CONFIG_DEFAULTS {           \
     .global_w        = DEFAULT_GLOBAL_W,        \
     .global_h        = DEFAULT_GLOBAL_H,        \

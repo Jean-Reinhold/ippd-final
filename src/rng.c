@@ -1,7 +1,7 @@
 #include "rng.h"
 
 RngState rng_seed(uint64_t seed) {
-    /* Ensure we never start with a zero state (xorshift degenerate case). */
+    /* Evita estado zero, que é o caso degenerado do xorshift. */
     return seed ? seed : 1;
 }
 
@@ -14,21 +14,20 @@ uint64_t rng_next(RngState *state) {
 
 double rng_double(RngState *state) {
     /*
-     * Divide by 2^64 to map the full uint64 range to [0, 1).
-     * The constant 5.421…e-20 = 1.0 / (1 << 64).
+     * Mapeia o intervalo completo de uint64 para [0, 1) dividindo por 2^53.
+     * Usa apenas os 53 bits mais significativos para preservar a precisão de double.
      */
     return (rng_next(state) >> 11) * (1.0 / (1ULL << 53));
 }
 
 uint64_t rng_cell_seed(uint64_t base_seed, int gx, int gy) {
     /*
-     * Multiplicative hashing: the constants 2654435761 (Knuth) and 40503
-     * spread coordinate bits across the 64-bit space so nearby cells get
-     * very different seeds.
+     * Hash multiplicativo: as constantes 2654435761 (Knuth) e 40503 espalham
+     * os bits das coordenadas pelo espaço de 64 bits, garantindo que células
+     * vizinhas recebam seeds bem distintas.
      */
     uint64_t h = base_seed ^ ((uint64_t)gx * 2654435761ULL)
                             ^ ((uint64_t)gy * 40503ULL);
-    /* One round of xorshift to mix the bits further. */
     h ^= h << 13;
     h ^= h >> 7;
     h ^= h << 17;

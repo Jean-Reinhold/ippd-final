@@ -2,12 +2,12 @@
 #define WORKLOAD_H
 
 /*
- * Perform a synthetic computational workload proportional to the cell's
- * resource level.  This simulates varying per-cell computation cost
- * to exercise load-balancing strategies.
+ * Executa carga de trabalho sintética proporcional ao nível de recurso
+ * da célula. Simula custo computacional variável por célula para
+ * exercitar estratégias de balanceamento de carga.
  *
- * Returns a volatile result to prevent the compiler from optimizing
- * the loop away.
+ * Retorna um resultado volatile para impedir o compilador de
+ * otimizar o loop.
  */
 double workload_compute(double resource, int max_iters);
 

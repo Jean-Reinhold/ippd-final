@@ -3,21 +3,21 @@
 
 #include <stdint.h>
 
-/* Deterministic xorshift64 PRNG — lightweight and reproducible. */
+/* PRNG xorshift64 determinístico — leve e reprodutível. */
 typedef uint64_t RngState;
 
-/* Seed a new PRNG state. */
+/* Inicializa um novo estado do PRNG. */
 RngState rng_seed(uint64_t seed);
 
-/* Generate the next pseudo-random 64-bit integer. */
+/* Gera o próximo inteiro pseudo-aleatório de 64 bits. */
 uint64_t rng_next(RngState *state);
 
-/* Generate a uniform double in [0, 1). */
+/* Gera um double uniforme em [0, 1). */
 double rng_double(RngState *state);
 
 /*
- * Derive a deterministic per-cell seed from a base seed and grid coordinates.
- * Uses multiplicative hashing to spread entropy across the grid.
+ * Deriva uma seed determinística por célula a partir de uma seed base
+ * e coordenadas da grade. Usa hash multiplicativo para espalhar entropia.
  */
 uint64_t rng_cell_seed(uint64_t base_seed, int gx, int gy);
 

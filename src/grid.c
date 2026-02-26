@@ -10,7 +10,6 @@
 #include <omp.h>
 #endif
 
-/* Max resource by CellType (indexed by enum value 0..4). */
 static const double max_resources[5] = {
     0.5,  /* ALDEIA      */
     1.0,  /* PESCA       */
@@ -18,8 +17,6 @@ static const double max_resources[5] = {
     0.9,  /* ROCADO      */
     0.0   /* INTERDITADA */
 };
-
-/* ------------------------------------------------------------------ */
 
 void subgrid_create(SubGrid *sg, Partition *p,
                     int global_w, int global_h) {
@@ -37,10 +34,8 @@ void subgrid_create(SubGrid *sg, Partition *p,
     sg->cells = calloc((size_t)sg->halo_h * sg->halo_w, sizeof(Cell));
 }
 
-/* ------------------------------------------------------------------ */
-
 void subgrid_init(SubGrid *sg, Partition *p, uint64_t seed) {
-    (void)p;  /* offsets are already stored in the SubGrid */
+    (void)p;  /* offsets já estão armazenados no SubGrid */
 
     for (int r = 1; r <= sg->local_h; r++) {
         for (int c = 1; c <= sg->local_w; c++) {
@@ -62,8 +57,6 @@ void subgrid_init(SubGrid *sg, Partition *p, uint64_t seed) {
     }
 }
 
-/* ------------------------------------------------------------------ */
-
 void subgrid_update(SubGrid *sg, Season season) {
     #pragma omp parallel for collapse(2) schedule(static)
     for (int r = 1; r <= sg->local_h; r++) {
@@ -71,23 +64,18 @@ void subgrid_update(SubGrid *sg, Season season) {
             int   idx  = CELL_AT(sg, r, c);
             Cell *cell = &sg->cells[idx];
 
-            /* Regenerate towards max_resource at the seasonal rate. */
             double regen = season_regen_rate(cell->type, season);
             cell->resource += regen * (cell->max_resource - cell->resource);
 
-            /* Clamp to valid range. */
             if (cell->resource < 0.0)
                 cell->resource = 0.0;
             if (cell->resource > cell->max_resource)
                 cell->resource = cell->max_resource;
 
-            /* Refresh accessibility for the current season. */
             cell->accessible = season_accessibility(cell->type, season);
         }
     }
 }
-
-/* ------------------------------------------------------------------ */
 
 void subgrid_destroy(SubGrid *sg) {
     if (sg) {

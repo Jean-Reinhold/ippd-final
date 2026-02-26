@@ -6,21 +6,21 @@
 #ifdef USE_MPI
 
 /*
- * Create a committed MPI_Datatype describing the Agent struct.
- * Caller must call MPI_Type_free when done.
+ * Cria um MPI_Datatype committed descrevendo a struct Agent.
+ * O caller deve chamar MPI_Type_free ao terminar.
  */
 MPI_Datatype migrate_agent_type(void);
 
 /*
- * Migrate agents whose global position (gx, gy) falls outside the local
- * partition to the correct owning rank.
+ * Migra agentes cuja posição global (gx, gy) saiu da partição local
+ * para o rank correto.
  *
- * Two-phase protocol:
- *   Phase 1 — MPI_Alltoall to exchange per-rank migration counts.
- *   Phase 2 — MPI_Alltoallv to exchange Agent structs.
+ * Protocolo em duas fases:
+ *   Fase 1 — MPI_Alltoall para trocar contagens por rank.
+ *   Fase 2 — MPI_Alltoallv para trocar structs Agent.
  *
- * On return the local agent array is compacted: migrated agents are removed,
- * received agents are appended.  *count and *capacity are updated.
+ * Ao retornar, o array local é compactado: migrantes removidos,
+ * recebidos anexados. *count e *capacity são atualizados.
  */
 void migrate_agents(Agent **agents, int *count, int *capacity,
                     Partition *p, SubGrid *sg,

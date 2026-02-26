@@ -80,20 +80,11 @@ static const char *bg_interditada[] = {
 static struct termios tui_orig_termios;
 static int            tui_raw_mode_active = 0;
 static int            tui_tty_fd = -1;
-static int            tui_saved_stdout_fd = -1;
 
 void tui_restore_terminal(void) {
     if (tui_raw_mode_active && tui_tty_fd >= 0) {
         printf(ANSI_CUR_SHOW);
         fflush(stdout);
-
-        /* Restore original stdout (mpirun's pipe) for final summary */
-        if (tui_saved_stdout_fd >= 0) {
-            fflush(stdout);
-            dup2(tui_saved_stdout_fd, STDOUT_FILENO);
-            close(tui_saved_stdout_fd);
-            tui_saved_stdout_fd = -1;
-        }
 
         tcsetattr(tui_tty_fd, TCSAFLUSH, &tui_orig_termios);
         tui_raw_mode_active = 0;
@@ -105,8 +96,8 @@ void tui_restore_terminal(void) {
 void tui_init_interactive(void) {
     if (tui_raw_mode_active) return;
 
-    /* Open the controlling terminal directly — this bypasses
-     * mpirun's stdin pipe so we always get a real tty fd. */
+    /* Abre o terminal de controle diretamente — contorna o pipe
+     * de stdin do mpirun para obter um fd de tty real. */
     tui_tty_fd = open("/dev/tty", O_RDONLY | O_NONBLOCK);
     if (tui_tty_fd < 0) return;  /* headless — skip silently */
 
@@ -119,15 +110,6 @@ void tui_init_interactive(void) {
     raw.c_cc[VTIME] = 0;
     tcsetattr(tui_tty_fd, TCSAFLUSH, &raw);
     tui_raw_mode_active = 1;
-
-    /* Redirect stdout → stderr for TUI output.
-     * mpirun buffers child stdout through a pipe that doesn't flush
-     * in real-time (output stays stuck in the pipe buffer).
-     * stderr is forwarded with far less buffering, so TUI frames
-     * actually reach the terminal as they're rendered. */
-    fflush(stdout);
-    tui_saved_stdout_fd = dup(STDOUT_FILENO);
-    dup2(STDERR_FILENO, STDOUT_FILENO);
 
     printf(ANSI_CUR_HIDE);
     fflush(stdout);
@@ -270,7 +252,6 @@ static void format_box_line(char *buf, size_t bufsz, const char *content, int in
     snprintf(buf + pos, bufsz - (size_t)pos, "%s", BOX_V);
 }
 
-/* ── Render ── */
 void tui_render(Cell *full_grid, int global_w, int global_h,
                 Agent *all_agents, int total_agents,
                 int cycle, int total_cycles,
@@ -288,9 +269,7 @@ void tui_render(Cell *full_grid, int global_w, int global_h,
     /* Grid occupies display_w * 2 terminal columns (2-char cells) */
     int grid_tcols = display_w * 2;
 
-    /*
-     * Build an agent presence map for O(1) lookup.
-     */
+    /* Mapa de presença de agentes para lookup O(1) durante a renderização. */
     int *agent_map = calloc((size_t)global_w * (size_t)global_h, sizeof(int));
     if (agent_map) {
         for (int i = 0; i < total_agents; i++) {
@@ -302,17 +281,12 @@ void tui_render(Cell *full_grid, int global_w, int global_h,
         }
     }
 
-    /* ── Build right-panel lines ── */
-    /* We'll have up to 20 right-panel lines for the Performance panel
-     * and a few more for Simulation + Controls.
-     * Each line is a pre-formatted string (plain content, no ANSI). */
     #define MAX_RPANEL_LINES 24
     char rpanel[MAX_RPANEL_LINES][256];
     int rcount = 0;  /* number of rpanel lines */
 
     int inner_w = RPANEL_W - 2;  /* minus left/right box chars */
 
-    /* ── Performance panel ── */
     {
         const char *perf_title = (ctrl && ctrl->state == TUI_PAUSED)
                                  ? "Performance (paused)" : "Performance";
@@ -367,7 +341,6 @@ void tui_render(Cell *full_grid, int global_w, int global_h,
     }
     format_box_bottom(rpanel[rcount++], 256, inner_w);
 
-    /* ── Simulation panel ── */
     format_box_top(rpanel[rcount++], 256, "Simulation", inner_w);
     {
         char tmp[128];
@@ -397,7 +370,6 @@ void tui_render(Cell *full_grid, int global_w, int global_h,
     }
     format_box_bottom(rpanel[rcount++], 256, inner_w);
 
-    /* ── Controls panel ── */
     if (ctrl) {
         format_box_top(rpanel[rcount++], 256, "Controls", inner_w);
         {
@@ -421,11 +393,8 @@ void tui_render(Cell *full_grid, int global_w, int global_h,
         format_box_bottom(rpanel[rcount++], 256, inner_w);
     }
 
-    /* ── Move cursor home (alt screen buffer handles the canvas) ── */
     printf(ANSI_HOME);
 
-    /* Grid top border + first rpanel line on the same row */
-    /* Grid box top: ┌─ Grid ─...─┐ */
     {
         char grid_top[256];
         char grid_title[64];
@@ -455,14 +424,11 @@ void tui_render(Cell *full_grid, int global_w, int global_h,
                 has_agent = agent_map[gy * global_w + gx];
 
             if (!c->accessible) {
-                /* Inaccessible: dim middle dots on dark gray */
                 printf(BG_INACCESSIBLE "\033[38;5;242m" MIDDLE_DOT MIDDLE_DOT ANSI_RESET);
             } else if (has_agent) {
-                /* Agent: bright yellow bullet on cell background */
                 const char *bg = cell_bg256(c->type, c->resource, c->max_resource);
                 printf("%s" FG_AGENT ANSI_BOLD BULLET " " ANSI_RESET, bg);
             } else {
-                /* Normal cell: 2 full-block chars with 256-color bg */
                 const char *bg = cell_bg256(c->type, c->resource, c->max_resource);
                 printf("%s" FULL_BLOCK FULL_BLOCK ANSI_RESET, bg);
             }
@@ -517,7 +483,6 @@ void tui_render(Cell *full_grid, int global_w, int global_h,
     free(agent_map);
 }
 
-/* ── MPI gather functions ── */
 #ifdef USE_MPI
 
 void tui_gather_grid(SubGrid *sg, Partition *p,

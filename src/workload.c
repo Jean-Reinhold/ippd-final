@@ -2,12 +2,12 @@
 
 double workload_compute(double resource, int max_iters) {
     /*
-     * Synthetic busy-loop whose iteration count scales with the cell's
-     * resource level.  This creates heterogeneous per-cell cost, which
-     * is the key motivation for dynamic load balancing in the simulation.
+     * Busy-loop sintético cuja contagem de iterações escala com o nível
+     * de recurso da célula. Isso cria custo heterogêneo por célula, que
+     * é a motivação principal para balanceamento dinâmico de carga.
      *
-     * The volatile qualifier on `result` prevents the compiler from
-     * eliminating the loop as dead code.
+     * O qualificador volatile em `result` impede o compilador de
+     * eliminar o loop como código morto.
      */
     int iters = (int)(resource * max_iters);
     volatile double result = 0.0;

@@ -4,10 +4,10 @@
 #include "types.h"
 
 /*
- * Initialise the 2D Cartesian MPI partition.
- * Derives rank and size from `comm`, factors size into px * py
- * (minimising |px - py|), creates an MPI Cartesian communicator,
- * and computes all 8 neighbour ranks (N, S, E, W, NE, NW, SE, SW).
+ * Inicializa a partição MPI cartesiana 2D.
+ * Obtém rank e size de `comm`, fatora size em px * py
+ * (minimizando |px - py|), cria um comunicador cartesiano MPI,
+ * e calcula os 8 ranks vizinhos (N, S, E, W, NE, NW, SE, SW).
  */
 #ifdef USE_MPI
 void partition_init(Partition *p, int global_w, int global_h,
@@ -18,27 +18,27 @@ void partition_init(Partition *p, int global_w, int global_h,
 #endif
 
 /*
- * Compute the local sub-grid dimensions and global offsets for this rank.
- * Work is divided evenly; the last column/row absorbs the remainder.
+ * Calcula dimensões locais da sub-grade e offsets globais deste rank.
+ * O trabalho é dividido uniformemente; a última coluna/linha absorve o resto.
  */
 void partition_subgrid_dims(const Partition *p, int global_w, int global_h,
                             int *local_w, int *local_h,
                             int *offset_x, int *offset_y);
 
 /*
- * Return the MPI rank that owns the cell at global coordinates (gx, gy).
+ * Retorna o rank MPI que possui a célula nas coordenadas globais (gx, gy).
  */
 int partition_rank_for_global(const Partition *p, int gx, int gy,
                               int global_w, int global_h);
 
 /*
- * Return 1 if (gx, gy) falls within this rank's owned region.
+ * Retorna 1 se (gx, gy) cai na região deste rank.
  */
 int partition_owns_global(const Partition *p, const SubGrid *sg,
                           int gx, int gy);
 
 /*
- * Free the Cartesian communicator (if MPI is active).
+ * Libera o comunicador cartesiano (se MPI estiver ativo).
  */
 void partition_destroy(Partition *p);
 

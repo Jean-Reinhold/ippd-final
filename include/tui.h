@@ -4,7 +4,6 @@
 #include "types.h"
 #include "metrics.h"
 
-/* ── Interactive TUI control ── */
 
 typedef enum {
     TUI_RUNNING = 0,
@@ -14,26 +13,26 @@ typedef enum {
 
 typedef struct {
     TuiState state;
-    int      speed_ms;   /* delay between frames in milliseconds */
+    int      speed_ms;   /* atraso entre frames em milissegundos */
 } TuiControl;
 
 /*
- * Set terminal to raw/non-blocking mode for interactive input.
- * Must be called only on rank 0.  Registers atexit handler
- * so the terminal is always restored on exit.
+ * Configura o terminal em modo raw/não-bloqueante para input interativo.
+ * Deve ser chamado apenas no rank 0. Registra handler via atexit
+ * para restaurar o terminal na saída.
  */
 void tui_init_interactive(void);
 
 /*
- * Restore the original terminal settings.
- * Safe to call multiple times.
+ * Restaura as configurações originais do terminal.
+ * Seguro chamar múltiplas vezes.
  */
 void tui_restore_terminal(void);
 
 /*
- * Non-blocking poll for keyboard input on rank 0.
- * Updates ctrl->state and ctrl->speed_ms based on keypresses.
- * Returns 1 if a single-step was requested (N key), 0 otherwise.
+ * Poll não-bloqueante de teclado no rank 0.
+ * Atualiza ctrl->state e ctrl->speed_ms conforme teclas pressionadas.
+ * Retorna 1 se foi solicitado passo único (tecla N), 0 caso contrário.
  */
 int tui_poll_input(TuiControl *ctrl);
 
@@ -41,20 +40,20 @@ int tui_poll_input(TuiControl *ctrl);
 #include <mpi.h>
 
 /*
- * Gather all subgrids to rank 0 and reorder from rank-order into
- * the spatial (row-major) global grid layout.
+ * Coleta todas as sub-grades no rank 0 e reordena de ordem-de-rank
+ * para layout espacial (row-major) da grade global.
  *
- * Only rank 0 writes into full_grid (must be pre-allocated to
- * global_w * global_h cells).  Other ranks send their interior cells.
+ * Apenas rank 0 escreve em full_grid (deve ser pré-alocado com
+ * global_w * global_h células). Demais ranks enviam células interiores.
  */
 void tui_gather_grid(SubGrid *sg, Partition *p,
                      Cell *full_grid, int global_w, int global_h,
                      MPI_Comm comm);
 
 /*
- * Gather all agents to rank 0.
- * On rank 0: *all_agents is malloc'd and must be freed by the caller.
- * On other ranks: *all_agents is set to NULL.
+ * Coleta todos os agentes no rank 0.
+ * No rank 0: *all_agents é alocado com malloc e deve ser liberado pelo caller.
+ * Nos demais ranks: *all_agents é definido como NULL.
  */
 void tui_gather_agents(Agent *local_agents, int local_count,
                        Agent **all_agents, int *total_count,
@@ -63,22 +62,22 @@ void tui_gather_agents(Agent *local_agents, int local_count,
 #endif /* USE_MPI */
 
 /*
- * Render the global grid to stdout using ANSI escape codes.
- * Should only be called on rank 0.
+ * Renderiza a grade global em stdout usando códigos ANSI.
+ * Deve ser chamado apenas no rank 0.
  *
- * Color scheme:
- *   ALDEIA      → magenta background, 'A'
- *   PESCA       → blue background,    'P'
- *   COLETA      → green background,   'C'
- *   ROCADO      → yellow background,  'R'
- *   INTERDITADA → red background,     'X'
- *   Inaccessible → dark gray '.'
- *   Agent present → bright yellow '@'
+ * Esquema de cores:
+ *   ALDEIA      → fundo magenta, 'A'
+ *   PESCA       → fundo azul,    'P'
+ *   COLETA      → fundo verde,   'C'
+ *   ROCADO      → fundo amarelo, 'R'
+ *   INTERDITADA → fundo vermelho,'X'
+ *   Inacessível → cinza escuro '.'
+ *   Agente      → amarelo brilhante '@'
  *
- * Resource intensity controls text brightness:
- *   > 0.66 * max → bright, > 0.33 * max → normal, else → dim
+ * Intensidade do recurso controla brilho:
+ *   > 0.66 * max → brilhante, > 0.33 * max → normal, senão → escuro
  *
- * If grid exceeds 80×40, downsampling is applied.
+ * Grades maiores que 80x40 são reduzidas por downsampling.
  */
 void tui_render(Cell *full_grid, int global_w, int global_h,
                 Agent *all_agents, int total_agents,

@@ -6,10 +6,10 @@
 #include <stdint.h>
 
 /*
- * Deterministically create and distribute agents across MPI ranks.
- * A single global RNG sequence decides every agent's initial position;
- * each rank keeps only the agents that land in its owned sub-grid.
- * The caller provides a pre-allocated `agents` array.
+ * Cria e distribui agentes deterministicamente entre ranks MPI.
+ * Uma única sequência global de RNG decide a posição inicial de cada agente;
+ * cada rank mantém apenas os que caem na sua sub-grade.
+ * O caller fornece o array `agents` pré-alocado.
  */
 void agents_init(Agent *agents, int *count, int num_total,
                  SubGrid *sg, Partition *p,
@@ -17,19 +17,19 @@ void agents_init(Agent *agents, int *count, int num_total,
                  double initial_energy, uint64_t seed);
 
 /*
- * Single-agent decision step.
- * Examines 8 neighbours plus the current cell, filters by accessibility,
- * and moves to the cell with the highest resource (ties broken by RNG).
- * The agent gains energy when consuming a resource, loses energy otherwise,
- * and dies (alive = 0) if energy drops to zero or below.
+ * Passo de decisão de um agente.
+ * Examina 8 vizinhos + célula atual, filtra por acessibilidade,
+ * e move para a célula com mais recurso (empates resolvidos por RNG).
+ * O agente ganha energia ao consumir recurso, perde caso contrário,
+ * e morre (alive = 0) se a energia cair a zero ou abaixo.
  */
 void agent_decide(Agent *a, SubGrid *sg, Season season, RngState *rng,
                   double energy_gain, double energy_loss);
 
 /*
- * Process all alive agents in parallel (OpenMP).
- * For each agent: run workload_compute on the current cell, then
- * agent_decide.  Migration is handled externally by migrate_agents().
+ * Processa todos os agentes vivos em paralelo (OpenMP).
+ * Para cada agente: executa workload_compute na célula atual,
+ * depois agent_decide. Migração é tratada externamente por migrate_agents().
  */
 void agents_process(Agent *agents, int count, SubGrid *sg,
                     Season season, int max_workload, uint64_t seed,

@@ -2,14 +2,9 @@
 #include "types.h"
 #include <float.h>
 
-/* ────────────────────────────────────────────────────────────────────────── *
- * Local metrics computation                                                 *
- * ────────────────────────────────────────────────────────────────────────── */
-
 void metrics_compute_local(const SubGrid *sg, const Agent *agents,
                            int count, SimMetrics *local)
 {
-    /* Sum resources over owned (interior) cells only */
     double total_res = 0.0;
     for (int r = 1; r <= sg->local_h; r++) {
         for (int c = 1; c <= sg->local_w; c++) {
@@ -18,7 +13,6 @@ void metrics_compute_local(const SubGrid *sg, const Agent *agents,
     }
     local->total_resource = total_res;
 
-    /* Agent energy statistics */
     double sum_energy = 0.0;
     double max_e      = -DBL_MAX;
     double min_e      =  DBL_MAX;
@@ -36,14 +30,10 @@ void metrics_compute_local(const SubGrid *sg, const Agent *agents,
     local->alive_agents = alive;
     local->max_energy   = (alive > 0) ? max_e : 0.0;
     local->min_energy   = (alive > 0) ? min_e : 0.0;
-    /* Store sum in avg_energy for now; the reduce step will compute the
-       true average as global_sum / global_alive. */
+    /* Guarda a soma por enquanto; o passo de redução calcula a média
+       real como soma_global / vivos_global. */
     local->avg_energy   = sum_energy;
 }
-
-/* ────────────────────────────────────────────────────────────────────────── *
- * Global reduction                                                          *
- * ────────────────────────────────────────────────────────────────────────── */
 
 #ifdef USE_MPI
 
@@ -52,16 +42,13 @@ void metrics_compute_local(const SubGrid *sg, const Agent *agents,
 void metrics_reduce_global(const SimMetrics *local, SimMetrics *global,
                            MPI_Comm comm)
 {
-    /* total_resource: SUM */
     MPI_Allreduce(&local->total_resource, &global->total_resource,
                   1, MPI_DOUBLE, MPI_SUM, comm);
 
-    /* alive_agents: SUM */
     MPI_Allreduce(&local->alive_agents, &global->alive_agents,
                   1, MPI_INT, MPI_SUM, comm);
 
-    /* avg_energy: we stored energy *sum* in local->avg_energy.
-       Reduce the sum, then divide by global alive count. */
+    /* avg_energy armazena a soma local; reduz a soma e divide pelo total de vivos. */
     double energy_sum_local = local->avg_energy;
     double energy_sum_global;
     MPI_Allreduce(&energy_sum_local, &energy_sum_global,
@@ -70,18 +57,17 @@ void metrics_reduce_global(const SimMetrics *local, SimMetrics *global,
                        ? energy_sum_global / global->alive_agents
                        : 0.0;
 
-    /* max_energy: MAX */
     MPI_Allreduce(&local->max_energy, &global->max_energy,
                   1, MPI_DOUBLE, MPI_MAX, comm);
 
-    /* min_energy: MIN (use a sentinel for ranks with no alive agents) */
+    /* Sentinela DBL_MAX para ranks sem agentes vivos, evitando que
+       um min espúrio contamine o resultado global. */
     double local_min = (local->alive_agents > 0)
                      ? local->min_energy
                      : DBL_MAX;
     MPI_Allreduce(&local_min, &global->min_energy,
                   1, MPI_DOUBLE, MPI_MIN, comm);
 
-    /* If no alive agents globally, normalise min */
     if (global->alive_agents == 0)
         global->min_energy = 0.0;
 }
