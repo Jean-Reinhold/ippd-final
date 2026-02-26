@@ -8,10 +8,15 @@
 #include <fcntl.h>
 
 /* ── ANSI escape helpers ── */
-#define ANSI_RESET   "\033[0m"
-#define ANSI_CLEAR   "\033[2J\033[H"
-#define ANSI_BOLD    "\033[1m"
-#define ANSI_DIM     "\033[2m"
+#define ANSI_RESET    "\033[0m"
+#define ANSI_HOME     "\033[H"       /* cursor to top-left              */
+#define ANSI_CLR_EOS  "\033[J"       /* clear from cursor to end of screen */
+#define ANSI_BOLD     "\033[1m"
+#define ANSI_DIM      "\033[2m"
+#define ANSI_ALT_ON   "\033[?1049h"  /* enter alternate screen buffer   */
+#define ANSI_ALT_OFF  "\033[?1049l"  /* leave alternate screen buffer   */
+#define ANSI_CUR_HIDE "\033[?25l"    /* hide cursor                     */
+#define ANSI_CUR_SHOW "\033[?25h"    /* show cursor                     */
 
 /* Maximum display dimensions before downsampling (in grid cells) */
 #define MAX_DISPLAY_W 40   /* 40 cells * 2 cols = 80 terminal columns */
@@ -75,9 +80,21 @@ static const char *bg_interditada[] = {
 static struct termios tui_orig_termios;
 static int            tui_raw_mode_active = 0;
 static int            tui_tty_fd = -1;
+static int            tui_saved_stdout_fd = -1;
 
 void tui_restore_terminal(void) {
     if (tui_raw_mode_active && tui_tty_fd >= 0) {
+        printf(ANSI_CUR_SHOW);
+        fflush(stdout);
+
+        /* Restore original stdout (mpirun's pipe) for final summary */
+        if (tui_saved_stdout_fd >= 0) {
+            fflush(stdout);
+            dup2(tui_saved_stdout_fd, STDOUT_FILENO);
+            close(tui_saved_stdout_fd);
+            tui_saved_stdout_fd = -1;
+        }
+
         tcsetattr(tui_tty_fd, TCSAFLUSH, &tui_orig_termios);
         tui_raw_mode_active = 0;
         close(tui_tty_fd);
@@ -102,6 +119,18 @@ void tui_init_interactive(void) {
     raw.c_cc[VTIME] = 0;
     tcsetattr(tui_tty_fd, TCSAFLUSH, &raw);
     tui_raw_mode_active = 1;
+
+    /* Redirect stdout → stderr for TUI output.
+     * mpirun buffers child stdout through a pipe that doesn't flush
+     * in real-time (output stays stuck in the pipe buffer).
+     * stderr is forwarded with far less buffering, so TUI frames
+     * actually reach the terminal as they're rendered. */
+    fflush(stdout);
+    tui_saved_stdout_fd = dup(STDOUT_FILENO);
+    dup2(STDERR_FILENO, STDOUT_FILENO);
+
+    printf(ANSI_CUR_HIDE);
+    fflush(stdout);
 }
 
 int tui_poll_input(TuiControl *ctrl) {
@@ -392,8 +421,8 @@ void tui_render(Cell *full_grid, int global_w, int global_h,
         format_box_bottom(rpanel[rcount++], 256, inner_w);
     }
 
-    /* ── Clear screen and render ── */
-    printf(ANSI_CLEAR);
+    /* ── Move cursor home (alt screen buffer handles the canvas) ── */
+    printf(ANSI_HOME);
 
     /* Grid top border + first rpanel line on the same row */
     /* Grid box top: ┌─ Grid ─...─┐ */
@@ -483,6 +512,7 @@ void tui_render(Cell *full_grid, int global_w, int global_h,
         printf("%s\n", rpanel[rline]);
     }
 
+    printf(ANSI_CLR_EOS);   /* wipe any leftover lines from previous frame */
     fflush(stdout);
     free(agent_map);
 }
