@@ -33,8 +33,32 @@ if [[ "$NP" -eq 1 ]]; then
     echo "Running: ./sim $SIM_ARGS  (direct, OMP_NUM_THREADS=$THREADS)"
     ./sim -w "$WIDTH" -h "$HEIGHT" -c "$CYCLES" -a "$AGENTS"
 else
+    # Multi-rank: use file-based TUI to bypass mpirun's stdout pipe.
+    # Rank 0 writes ANSI frames to a temp file; a shell viewer loop
+    # reads and displays them independently.
+    TUI_FILE="/tmp/ippd_tui_$$"
+    trap 'rm -f "$TUI_FILE" "$TUI_FILE.tmp"' EXIT
+
     echo "Running: mpirun -np $NP ./sim $SIM_ARGS  (OMP_NUM_THREADS=$THREADS)"
     mpirun --oversubscribe -np "$NP" ./sim \
-        -w "$WIDTH" -h "$HEIGHT" -c "$CYCLES" -a "$AGENTS" --no-tui
-    echo "(TUI disabled for multi-rank — use NP=1 for interactive mode)"
+        -w "$WIDTH" -h "$HEIGHT" -c "$CYCLES" -a "$AGENTS" \
+        --tui-file "$TUI_FILE" &
+    SIM_PID=$!
+
+    # Wait for first frame to be written
+    sleep 0.5
+    printf '\033[?25l'  # hide cursor
+
+    # Viewer loop: read file, display with ANSI home cursor reset
+    while kill -0 "$SIM_PID" 2>/dev/null; do
+        if [[ -f "$TUI_FILE" ]]; then
+            printf '\033[H'
+            cat "$TUI_FILE"
+            printf '\033[J'
+        fi
+        sleep 0.1
+    done
+
+    printf '\033[?25h'  # restore cursor
+    wait "$SIM_PID"
 fi

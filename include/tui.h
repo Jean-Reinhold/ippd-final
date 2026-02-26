@@ -62,6 +62,12 @@ void tui_gather_agents(Agent *local_agents, int local_count,
 #endif /* USE_MPI */
 
 /*
+ * Redireciona a saída dos frames da TUI para um arquivo.
+ * Passe NULL ou string vazia para voltar ao stdout.
+ */
+void tui_set_output_file(const char *path);
+
+/*
  * Renderiza a grade global em stdout usando códigos ANSI.
  * Deve ser chamado apenas no rank 0.
  *

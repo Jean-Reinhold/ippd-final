@@ -38,7 +38,7 @@ void partition_init(Partition *p, int global_w, int global_h,
      * para manter sub-grades aproximadamente quadradas.
      */
     if (global_w >= global_h) {
-        p->px = best_py;   /* more columns for wider grids */
+        p->px = best_py;
         p->py = best_px;
     } else {
         p->px = best_px;

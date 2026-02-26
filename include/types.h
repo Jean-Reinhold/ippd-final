@@ -64,6 +64,7 @@ typedef struct {
     uint64_t seed;
     int      tui_enabled;
     int      tui_interval;
+    char     tui_file[256];
 } SimConfig;
 
 typedef struct {

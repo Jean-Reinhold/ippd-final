@@ -7,7 +7,6 @@
 #include <termios.h>
 #include <fcntl.h>
 
-/* ── ANSI escape helpers ── */
 #define ANSI_RESET    "\033[0m"
 #define ANSI_HOME     "\033[H"       /* cursor to top-left              */
 #define ANSI_CLR_EOS  "\033[J"       /* clear from cursor to end of screen */
@@ -18,11 +17,9 @@
 #define ANSI_CUR_HIDE "\033[?25l"    /* hide cursor                     */
 #define ANSI_CUR_SHOW "\033[?25h"    /* show cursor                     */
 
-/* Maximum display dimensions before downsampling (in grid cells) */
 #define MAX_DISPLAY_W 40   /* 40 cells * 2 cols = 80 terminal columns */
 #define MAX_DISPLAY_H 30
 
-/* Speed limits for interactive control */
 #define SPEED_MIN_MS  10
 #define SPEED_MAX_MS  2000
 #define SPEED_STEP_MS 25
@@ -30,7 +27,6 @@
 /* Right-panel width in terminal columns (including box-drawing borders) */
 #define RPANEL_W 36
 
-/* ── Box-drawing UTF-8 constants ── */
 #define BOX_TL "\xe2\x94\x8c"   /* ┌ */
 #define BOX_TR "\xe2\x94\x90"   /* ┐ */
 #define BOX_BL "\xe2\x94\x94"   /* └ */
@@ -39,7 +35,6 @@
 #define BOX_V  "\xe2\x94\x82"   /* │ */
 #define BOX_T  "\xe2\x94\x9c"   /* ├ */
 
-/* ── UTF-8 display characters ── */
 #define FULL_BLOCK "\xe2\x96\x88"   /* █ */
 #define BULLET     "\xe2\x97\x8f"   /* ● */
 #define MIDDLE_DOT "\xc2\xb7"       /* · */
@@ -76,7 +71,15 @@ static const char *bg_interditada[] = {
 /* Agent: bright yellow foreground (color 226) */
 #define FG_AGENT "\033[38;5;226m"
 
-/* ── Interactive terminal state ── */
+static char tui_out_path[256] = "";
+
+void tui_set_output_file(const char *path) {
+    if (path)
+        strncpy(tui_out_path, path, sizeof(tui_out_path) - 1);
+    else
+        tui_out_path[0] = '\0';
+}
+
 static struct termios tui_orig_termios;
 static int            tui_raw_mode_active = 0;
 static int            tui_tty_fd = -1;
@@ -148,12 +151,10 @@ int tui_poll_input(TuiControl *ctrl) {
     return 0;
 }
 
-/* ── Season name helper ── */
 static const char *season_name(Season s) {
     return s == DRY ? "DRY" : "WET";
 }
 
-/* ── 256-color background for a cell type, with resource intensity ── */
 static const char *cell_bg256(CellType t, double resource, double max_resource) {
     int shade = 1;  /* default: normal */
     if (max_resource > 0.0) {
@@ -172,7 +173,6 @@ static const char *cell_bg256(CellType t, double resource, double max_resource) 
     }
 }
 
-/* ── Format a horizontal bar ── */
 static void format_bar(char *buf, size_t bufsz, double fraction, int bar_w) {
     int filled = (int)(fraction * bar_w + 0.5);
     if (filled > bar_w) filled = bar_w;
@@ -195,7 +195,6 @@ static void format_bar(char *buf, size_t bufsz, double fraction, int bar_w) {
     buf[pos] = '\0';
 }
 
-/* ── Format a right-panel top/bottom border line ── */
 static void format_box_top(char *buf, size_t bufsz, const char *title, int inner_w) {
     /* ┌─ Title ─...─┐ */
     int title_len = (int)strlen(title);
@@ -219,9 +218,6 @@ static void format_box_bottom(char *buf, size_t bufsz, int inner_w) {
     snprintf(buf + pos, bufsz - (size_t)pos, "%s", BOX_BR);
 }
 
-/* ── Count display columns for a UTF-8 string (no ANSI escapes) ── */
-/* Each ASCII byte (0x00–0x7F) = 1 column.  Each multi-byte sequence
- * (leading byte 0xC0+ followed by continuation bytes 0x80–0xBF) = 1 column. */
 static int utf8_display_width(const char *s) {
     int width = 0;
     for (const unsigned char *p = (const unsigned char *)s; *p; ) {
@@ -238,7 +234,6 @@ static int utf8_display_width(const char *s) {
     return width;
 }
 
-/* ── Pad or truncate a line to exactly `width` visible characters ── */
 static void format_box_line(char *buf, size_t bufsz, const char *content, int inner_w) {
     int clen = utf8_display_width(content);
     int pad = inner_w - clen;
@@ -393,7 +388,16 @@ void tui_render(Cell *full_grid, int global_w, int global_h,
         format_box_bottom(rpanel[rcount++], 256, inner_w);
     }
 
-    printf(ANSI_HOME);
+    /* ── Open output stream (file or stdout) ── */
+    FILE *out = stdout;
+    char tmp_path[270] = "";
+    if (tui_out_path[0]) {
+        snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", tui_out_path);
+        out = fopen(tmp_path, "w");
+        if (!out) out = stdout;
+    }
+
+    fprintf(out, ANSI_HOME);
 
     {
         char grid_top[256];
@@ -401,19 +405,17 @@ void tui_render(Cell *full_grid, int global_w, int global_h,
         snprintf(grid_title, sizeof(grid_title), "Grid [Cycle %d/%d %s]",
                  cycle, total_cycles, season_name(season));
         format_box_top(grid_top, sizeof(grid_top), grid_title, grid_tcols);
-        printf("%s", grid_top);
-        /* Space between panels */
+        fprintf(out, "%s", grid_top);
         if (rcount > 0)
-            printf(" %s", rpanel[0]);
-        printf("\n");
+            fprintf(out, " %s", rpanel[0]);
+        fprintf(out, "\n");
     }
 
-    /* Grid rows side-by-side with rpanel lines */
     for (int dy = 0; dy < display_h; dy++) {
         int gy = dy * step_y;
 
         /* Left border */
-        printf("%s", BOX_V);
+        fprintf(out, "%s", BOX_V);
 
         for (int dx = 0; dx < display_w; dx++) {
             int gx = dx * step_x;
@@ -424,62 +426,66 @@ void tui_render(Cell *full_grid, int global_w, int global_h,
                 has_agent = agent_map[gy * global_w + gx];
 
             if (!c->accessible) {
-                printf(BG_INACCESSIBLE "\033[38;5;242m" MIDDLE_DOT MIDDLE_DOT ANSI_RESET);
+                fprintf(out, BG_INACCESSIBLE "\033[38;5;242m" MIDDLE_DOT MIDDLE_DOT ANSI_RESET);
             } else if (has_agent) {
                 const char *bg = cell_bg256(c->type, c->resource, c->max_resource);
-                printf("%s" FG_AGENT ANSI_BOLD BULLET " " ANSI_RESET, bg);
+                fprintf(out, "%s" FG_AGENT ANSI_BOLD BULLET " " ANSI_RESET, bg);
             } else {
                 const char *bg = cell_bg256(c->type, c->resource, c->max_resource);
-                printf("%s" FULL_BLOCK FULL_BLOCK ANSI_RESET, bg);
+                fprintf(out, "%s" FULL_BLOCK FULL_BLOCK ANSI_RESET, bg);
             }
         }
 
         /* Right border of grid box */
-        printf("%s", BOX_V);
+        fprintf(out, "%s", BOX_V);
 
-        /* Adjacent rpanel line (dy+1 because row 0 was the top border) */
         int rline = dy + 1;
         if (rline < rcount)
-            printf(" %s", rpanel[rline]);
+            fprintf(out, " %s", rpanel[rline]);
 
-        printf("\n");
+        fprintf(out, "\n");
     }
 
     /* Grid bottom border */
     {
         char grid_bot[256];
         format_box_bottom(grid_bot, sizeof(grid_bot), grid_tcols);
-        printf("%s", grid_bot);
+        fprintf(out, "%s", grid_bot);
 
         int rline = display_h + 1;
         if (rline < rcount)
-            printf(" %s", rpanel[rline]);
-        printf("\n");
+            fprintf(out, " %s", rpanel[rline]);
+        fprintf(out, "\n");
     }
 
-    /* Color legend below the grid */
-    printf(" ");
+    fprintf(out, " ");
     const char *legend_bg[] = {
         "\033[48;5;127m", "\033[48;5;27m", "\033[48;5;28m",
         "\033[48;5;136m", "\033[48;5;124m"
     };
     const char *legend_lbl[] = { "A", "P", "C", "R", "X" };
     for (int i = 0; i < 5; i++)
-        printf(" %s %s " ANSI_RESET, legend_bg[i], legend_lbl[i]);
-    printf("  " BG_INACCESSIBLE "\033[38;5;242m" MIDDLE_DOT MIDDLE_DOT ANSI_RESET ":closed");
-    printf("  " FG_AGENT ANSI_BOLD BULLET ANSI_RESET ":agent\n");
+        fprintf(out, " %s %s " ANSI_RESET, legend_bg[i], legend_lbl[i]);
+    fprintf(out, "  " BG_INACCESSIBLE "\033[38;5;242m" MIDDLE_DOT MIDDLE_DOT ANSI_RESET ":closed");
+    fprintf(out, "  " FG_AGENT ANSI_BOLD BULLET ANSI_RESET ":agent\n");
 
-    /* Any remaining rpanel lines that didn't fit beside the grid */
     for (int rline = display_h + 2; rline < rcount; rline++) {
-        /* Indent to align with where the rpanel column starts */
         /* grid_tcols + 2 (left/right box chars) + 1 space */
         for (int s = 0; s < grid_tcols + 3; s++)
-            putchar(' ');
-        printf("%s\n", rpanel[rline]);
+            fputc(' ', out);
+        fprintf(out, "%s\n", rpanel[rline]);
     }
 
-    printf(ANSI_CLR_EOS);   /* wipe any leftover lines from previous frame */
-    fflush(stdout);
+    fprintf(out, ANSI_CLR_EOS);
+
+    /* ── Close file output with atomic rename ── */
+    if (out != stdout) {
+        fclose(out);
+        rename(tmp_path, tui_out_path);
+    } else {
+        fflush(out);
+    }
+
     free(agent_map);
 }
 
@@ -534,7 +540,6 @@ void tui_gather_grid(SubGrid *sg, Partition *p,
         int local_h = sg->local_h;
 
         for (int r = 0; r < size; r++) {
-            /* Determine the spatial origin of rank r's block */
             int col_in_grid = r % p->px;
             int row_in_grid = r / p->px;
             int origin_x = col_in_grid * local_w;
@@ -567,14 +572,12 @@ void tui_gather_agents(Agent *local_agents, int local_count,
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &size);
 
-    /* Gather all local counts to rank 0 */
     int *counts = NULL;
     if (rank == 0) {
         counts = malloc(sizeof(int) * (size_t)size);
     }
     MPI_Gather(&local_count, 1, MPI_INT, counts, 1, MPI_INT, 0, comm);
 
-    /* Build displacement array and total count on rank 0 */
     int *displs = NULL;
     int total = 0;
     int agent_bytes = (int)sizeof(Agent);
@@ -588,7 +591,6 @@ void tui_gather_agents(Agent *local_agents, int local_count,
         *total_count = total;
         *all_agents = malloc(sizeof(Agent) * (size_t)(total > 0 ? total : 1));
 
-        /* Convert counts and displs to byte units for MPI_Gatherv */
         for (int i = 0; i < size; i++) {
             counts[i] *= agent_bytes;
             displs[i] *= agent_bytes;

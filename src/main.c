@@ -38,6 +38,8 @@ static void parse_args(int argc, char **argv, SimConfig *cfg) {
             cfg->tui_enabled = 0;
         else if (strcmp(argv[i], "--tui-interval") == 0 && i + 1 < argc)
             cfg->tui_interval = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--tui-file") == 0 && i + 1 < argc)
+            strncpy(cfg->tui_file, argv[++i], sizeof(cfg->tui_file) - 1);
     }
 }
 
@@ -52,7 +54,8 @@ static void usage(const char *prog) {
         "  -W WORKLOAD       Max workload iterations (default %d)\n"
         "  -S SEED           Random seed (default %llu)\n"
         "  --no-tui          Disable TUI rendering\n"
-        "  --tui-interval N  Render TUI every N cycles (default %d)\n",
+        "  --tui-interval N  Render TUI every N cycles (default %d)\n"
+        "  --tui-file PATH   Write TUI frames to file (for MPI compatibility)\n",
         prog,
         DEFAULT_GLOBAL_W, DEFAULT_GLOBAL_H, DEFAULT_TOTAL_CYCLES,
         DEFAULT_SEASON_LENGTH, DEFAULT_NUM_AGENTS, DEFAULT_MAX_WORKLOAD,
@@ -122,6 +125,9 @@ int main(int argc, char **argv) {
 
     if (cfg.tui_enabled && rank == 0)
         tui_init_interactive();
+
+    if (cfg.tui_file[0] && rank == 0)
+        tui_set_output_file(cfg.tui_file);
 
     double t_start = MPI_Wtime();
     int cycle = 0;
