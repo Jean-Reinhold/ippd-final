@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <termios.h>
 
 /* ── ANSI escape helpers ── */
 #define ANSI_RESET   "\033[0m"
@@ -27,6 +29,67 @@
 /* Maximum display dimensions before downsampling */
 #define MAX_DISPLAY_W 80
 #define MAX_DISPLAY_H 40
+
+/* Speed limits for interactive control */
+#define SPEED_MIN_MS  10
+#define SPEED_MAX_MS  2000
+#define SPEED_STEP_MS 25
+
+/* ── Interactive terminal state ── */
+static struct termios tui_orig_termios;
+static int            tui_raw_mode_active = 0;
+
+void tui_restore_terminal(void) {
+    if (tui_raw_mode_active) {
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &tui_orig_termios);
+        tui_raw_mode_active = 0;
+    }
+}
+
+void tui_init_interactive(void) {
+    if (tui_raw_mode_active) return;
+
+    tcgetattr(STDIN_FILENO, &tui_orig_termios);
+    atexit(tui_restore_terminal);
+
+    struct termios raw = tui_orig_termios;
+    raw.c_lflag &= (tcflag_t)~(ICANON | ECHO);
+    raw.c_cc[VMIN]  = 0;   /* non-blocking */
+    raw.c_cc[VTIME] = 0;
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+    tui_raw_mode_active = 1;
+}
+
+int tui_poll_input(TuiControl *ctrl) {
+    char ch;
+    if (read(STDIN_FILENO, &ch, 1) != 1) return 0;
+
+    switch (ch) {
+        case ' ':
+            ctrl->state = (ctrl->state == TUI_RUNNING)
+                          ? TUI_PAUSED : TUI_RUNNING;
+            break;
+        case 'n': case 'N':
+            ctrl->state = TUI_PAUSED;
+            return 1;  /* step requested */
+        case '+': case '=':
+            ctrl->speed_ms += SPEED_STEP_MS;
+            if (ctrl->speed_ms > SPEED_MAX_MS)
+                ctrl->speed_ms = SPEED_MAX_MS;
+            break;
+        case '-':
+            ctrl->speed_ms -= SPEED_STEP_MS;
+            if (ctrl->speed_ms < SPEED_MIN_MS)
+                ctrl->speed_ms = SPEED_MIN_MS;
+            break;
+        case 'q': case 'Q':
+            ctrl->state = TUI_QUIT;
+            break;
+        default:
+            break;
+    }
+    return 0;
+}
 
 /* ── Season name helper ── */
 static const char *season_name(Season s) {

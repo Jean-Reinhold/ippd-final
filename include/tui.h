@@ -4,6 +4,39 @@
 #include "types.h"
 #include "metrics.h"
 
+/* ── Interactive TUI control ── */
+
+typedef enum {
+    TUI_RUNNING = 0,
+    TUI_PAUSED  = 1,
+    TUI_QUIT    = 2
+} TuiState;
+
+typedef struct {
+    TuiState state;
+    int      speed_ms;   /* delay between frames in milliseconds */
+} TuiControl;
+
+/*
+ * Set terminal to raw/non-blocking mode for interactive input.
+ * Must be called only on rank 0.  Registers atexit handler
+ * so the terminal is always restored on exit.
+ */
+void tui_init_interactive(void);
+
+/*
+ * Restore the original terminal settings.
+ * Safe to call multiple times.
+ */
+void tui_restore_terminal(void);
+
+/*
+ * Non-blocking poll for keyboard input on rank 0.
+ * Updates ctrl->state and ctrl->speed_ms based on keypresses.
+ * Returns 1 if a single-step was requested (N key), 0 otherwise.
+ */
+int tui_poll_input(TuiControl *ctrl);
+
 #ifdef USE_MPI
 #include <mpi.h>
 
@@ -49,6 +82,7 @@ void tui_gather_agents(Agent *local_agents, int local_count,
  */
 void tui_render(Cell *full_grid, int global_w, int global_h,
                 Agent *all_agents, int total_agents,
-                int cycle, Season season, SimMetrics *metrics);
+                int cycle, Season season, SimMetrics *metrics,
+                TuiControl *ctrl);
 
 #endif /* TUI_H */
