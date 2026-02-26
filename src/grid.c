@@ -51,7 +51,7 @@ void subgrid_init(SubGrid *sg, Partition *p, uint64_t seed) {
             int idx = CELL_AT(sg, r, c);
             sg->cells[idx].type         = type;
             sg->cells[idx].max_resource = max_res;
-            sg->cells[idx].resource     = max_res;
+            sg->cells[idx].resource     = 0.0;
             sg->cells[idx].accessible   = 1;
         }
     }
