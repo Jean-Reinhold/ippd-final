@@ -204,6 +204,18 @@ void tui_render(Cell *full_grid, int global_w, int global_h,
                metrics->alive_agents);
     }
 
+    /* Controls bar (interactive mode) */
+    if (ctrl) {
+        const char *icon  = (ctrl->state == TUI_RUNNING) ? "\xe2\x96\xb6" : "\xe2\x8f\xb8";
+        const char *label = (ctrl->state == TUI_RUNNING) ? "RUNNING" : "PAUSED ";
+        const char *hint  = (ctrl->state == TUI_RUNNING)
+                            ? "SPACE:pause"
+                            : "SPACE:resume";
+        printf(ANSI_BOLD "%s %s" ANSI_RESET " [Speed: %dms] | "
+               "%s  N:step  +/-:speed  Q:quit\n",
+               icon, label, ctrl->speed_ms, hint);
+    }
+
     fflush(stdout);
     free(agent_map);
 }
