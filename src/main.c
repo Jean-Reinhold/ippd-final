@@ -127,16 +127,81 @@ int main(int argc, char **argv) {
                            (size_t)cfg.global_w * (size_t)cfg.global_h);
     }
 
-    /* ── 7. Main simulation loop ── */
+    /* ── 7. Interactive simulation loop ── */
+    TuiControl ctrl = { .state = TUI_PAUSED, .speed_ms = 100 };
+
+    /* In non-TUI (batch) mode, run without interactive controls */
+    if (!cfg.tui_enabled)
+        ctrl.state = TUI_RUNNING;
+    else if (rank == 0)
+        tui_init_interactive();
+
     double t_start = MPI_Wtime();
+    int cycle = 0;
 
-    for (int cycle = 0; cycle < cfg.total_cycles; cycle++) {
+    while (cycle < cfg.total_cycles && ctrl.state != TUI_QUIT) {
+        int step_requested = 0;
 
-        /* 5.1 — Season update + broadcast + update cell accessibility */
+        /* 7.1 — Rank 0 polls keyboard input (TUI mode only) */
+        if (rank == 0 && cfg.tui_enabled)
+            step_requested = tui_poll_input(&ctrl);
+
+        /* 7.2 — Broadcast control state to all ranks */
+        MPI_Bcast(&ctrl, sizeof(ctrl), MPI_BYTE, 0, partition.cart_comm);
+        MPI_Bcast(&step_requested, 1, MPI_INT, 0, partition.cart_comm);
+
+        if (ctrl.state == TUI_QUIT) break;
+
+        /* 7.3 — Handle paused state */
+        if (ctrl.state == TUI_PAUSED && !step_requested) {
+            if (rank == 0 && cfg.tui_enabled) {
+                /* Render current state while paused so controls bar is visible */
+                tui_gather_grid(&sg, &partition, full_grid,
+                                cfg.global_w, cfg.global_h,
+                                partition.cart_comm);
+
+                Agent *all_agents = NULL;
+                int total_agents = 0;
+                tui_gather_agents(agents, agent_count, &all_agents,
+                                  &total_agents, partition.cart_comm);
+
+                SimMetrics local_m, global_m;
+                metrics_compute_local(&sg, agents, agent_count, &local_m);
+                metrics_reduce_global(&local_m, &global_m,
+                                      partition.cart_comm);
+
+                tui_render(full_grid, cfg.global_w, cfg.global_h,
+                           all_agents, total_agents,
+                           cycle, season_for_cycle(cycle, cfg.season_length),
+                           &global_m, &ctrl);
+                free(all_agents);
+                usleep(50000); /* 50ms poll interval to avoid busy-wait */
+            } else {
+                /* Non-zero ranks still participate in collective calls */
+                tui_gather_grid(&sg, &partition, NULL,
+                                cfg.global_w, cfg.global_h,
+                                partition.cart_comm);
+                Agent *dummy = NULL;
+                int dummy_count = 0;
+                tui_gather_agents(agents, agent_count, &dummy,
+                                  &dummy_count, partition.cart_comm);
+                free(dummy);
+
+                SimMetrics local_m, global_m;
+                metrics_compute_local(&sg, agents, agent_count, &local_m);
+                metrics_reduce_global(&local_m, &global_m,
+                                      partition.cart_comm);
+            }
+            MPI_Barrier(partition.cart_comm);
+            continue;
+        }
+
+        /* ── Execute one simulation cycle ── */
+
+        /* 7.4 — Season update + broadcast + update cell accessibility */
         Season season = season_for_cycle(cycle, cfg.season_length);
         MPI_Bcast(&season, 1, MPI_INT, 0, partition.cart_comm);
 
-        /* Update accessibility for all owned cells */
         for (int r = 1; r <= sg.local_h; r++) {
             for (int c = 1; c <= sg.local_w; c++) {
                 Cell *cell = &sg.cells[CELL_AT(&sg, r, c)];
@@ -144,57 +209,51 @@ int main(int argc, char **argv) {
             }
         }
 
-        /* 5.2 — Halo exchange */
+        /* 7.5 — Halo exchange */
         halo_exchange(&sg, &partition);
 
-        /* 5.3 — Agent processing (decision-making + workload) */
+        /* 7.6 — Agent processing (decision-making + workload) */
         agents_process(agents, agent_count, &sg, season,
                        cfg.max_workload, cfg.seed);
 
-        /* 5.4 — Agent migration between ranks */
+        /* 7.7 — Agent migration between ranks */
         migrate_agents(&agents, &agent_count, &agent_capacity,
                        &partition, &sg, cfg.global_w, cfg.global_h);
 
-        /* 5.5 — Subgrid resource update (regeneration) */
+        /* 7.8 — Subgrid resource update (regeneration) */
         subgrid_update(&sg, season);
 
-        /* 5.6 — Metrics */
+        /* 7.9 — Metrics */
         SimMetrics local_metrics, global_metrics;
         metrics_compute_local(&sg, agents, agent_count, &local_metrics);
         metrics_reduce_global(&local_metrics, &global_metrics,
                               partition.cart_comm);
 
-        /* 5.7 — TUI rendering (rank 0 only, at intervals) */
-        if (rank == 0 && cfg.tui_enabled &&
+        /* 7.10 — TUI rendering (rank 0 only, at intervals) */
+        if (cfg.tui_enabled &&
             (cycle % cfg.tui_interval == 0 ||
              cycle == cfg.total_cycles - 1)) {
 
-            tui_gather_grid(&sg, &partition, full_grid,
-                            cfg.global_w, cfg.global_h,
-                            partition.cart_comm);
-
-            Agent *all_agents = NULL;
-            int total_agents = 0;
-            tui_gather_agents(agents, agent_count, &all_agents,
-                              &total_agents, partition.cart_comm);
-
-            tui_render(full_grid, cfg.global_w, cfg.global_h,
-                       all_agents, total_agents,
-                       cycle, season, &global_metrics);
-
-            free(all_agents);
-        } else {
-            /*
-             * Non-rendering ranks still participate in the gather
-             * if TUI is enabled on this cycle.
-             */
-            if (cfg.tui_enabled &&
-                (cycle % cfg.tui_interval == 0 ||
-                 cycle == cfg.total_cycles - 1)) {
-                tui_gather_grid(&sg, &partition, NULL,
+            if (rank == 0) {
+                tui_gather_grid(&sg, &partition, full_grid,
                                 cfg.global_w, cfg.global_h,
                                 partition.cart_comm);
 
+                Agent *all_agents = NULL;
+                int total_agents = 0;
+                tui_gather_agents(agents, agent_count, &all_agents,
+                                  &total_agents, partition.cart_comm);
+
+                tui_render(full_grid, cfg.global_w, cfg.global_h,
+                           all_agents, total_agents,
+                           cycle, season, &global_metrics, &ctrl);
+
+                free(all_agents);
+                usleep((unsigned int)(ctrl.speed_ms * 1000));
+            } else {
+                tui_gather_grid(&sg, &partition, NULL,
+                                cfg.global_w, cfg.global_h,
+                                partition.cart_comm);
                 Agent *dummy = NULL;
                 int dummy_count = 0;
                 tui_gather_agents(agents, agent_count, &dummy,
@@ -202,9 +261,15 @@ int main(int argc, char **argv) {
                 free(dummy);
             }
         }
+
+        cycle++;
     }
 
     double t_end = MPI_Wtime();
+
+    /* Restore terminal before printing final output */
+    if (rank == 0 && cfg.tui_enabled)
+        tui_restore_terminal();
 
     /* ── 8. Final output ── */
     if (rank == 0) {
