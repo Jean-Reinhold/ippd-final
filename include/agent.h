@@ -49,4 +49,12 @@ void agents_process(Agent *agents, int count, SubGrid *sg,
                     Season season, int max_workload, uint64_t seed,
                     double energy_gain, double energy_loss);
 
+/*
+ * Reprodução: agentes com energia acima de threshold geram um filho.
+ * O filho nasce na mesma posição com energy = cost; o pai perde cost.
+ * Serial (modifica tamanho do array e next_id).
+ */
+void agents_reproduce(Agent **agents, int *count, int *capacity,
+                      int *next_id, double threshold, double cost);
+
 #endif /* AGENT_H */

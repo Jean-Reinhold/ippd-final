@@ -138,6 +138,32 @@ void agents_decide_all(Agent *agents, int count, SubGrid *sg,
     }
 }
 
+void agents_reproduce(Agent **agents, int *count, int *capacity,
+                      int *next_id, double threshold, double cost) {
+    Agent *ag = *agents;
+    int n = *count;
+    /* Scan only the current population (children don't reproduce this cycle) */
+    for (int i = 0; i < n; i++) {
+        if (!ag[i].alive || ag[i].energy <= threshold) continue;
+        ag[i].energy -= cost;
+        /* Grow if needed */
+        if (*count >= *capacity) {
+            int new_cap = *capacity ? *capacity * 2 : 16;
+            ag = realloc(ag, sizeof(Agent) * (size_t)new_cap);
+            *agents = ag;
+            *capacity = new_cap;
+        }
+        Agent *child = &ag[*count];
+        child->id     = (*next_id)++;
+        child->gx     = ag[i].gx;
+        child->gy     = ag[i].gy;
+        child->energy  = cost;
+        child->alive   = 1;
+        (*count)++;
+    }
+    *agents = ag;
+}
+
 void agents_process(Agent *agents, int count, SubGrid *sg,
                     Season season, int max_workload, uint64_t seed,
                     double energy_gain, double energy_loss) {

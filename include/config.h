@@ -13,6 +13,8 @@
 #define DEFAULT_ENERGY_GAIN     0.3
 #define DEFAULT_ENERGY_LOSS     0.05
 #define DEFAULT_INITIAL_ENERGY  1.0
+#define DEFAULT_REPRODUCE_THRESHOLD 4.0
+#define DEFAULT_REPRODUCE_COST      2.0
 #define DEFAULT_SEED            42ULL
 #define DEFAULT_TUI_ENABLED     1
 #define DEFAULT_TUI_INTERVAL    1
@@ -28,6 +30,8 @@
     .energy_gain     = DEFAULT_ENERGY_GAIN,     \
     .energy_loss     = DEFAULT_ENERGY_LOSS,     \
     .initial_energy  = DEFAULT_INITIAL_ENERGY,  \
+    .reproduce_threshold = DEFAULT_REPRODUCE_THRESHOLD, \
+    .reproduce_cost  = DEFAULT_REPRODUCE_COST, \
     .seed            = DEFAULT_SEED,            \
     .tui_enabled     = DEFAULT_TUI_ENABLED,     \
     .tui_interval    = DEFAULT_TUI_INTERVAL,    \

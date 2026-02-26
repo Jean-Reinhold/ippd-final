@@ -16,12 +16,12 @@ set -e
 
 cd "$(dirname "$0")/.."
 
-NP=${NP:-1}
+NP=${NP:-5}
 THREADS=${THREADS:-12}
 WIDTH=${WIDTH:-80}
 HEIGHT=${HEIGHT:-80}
 CYCLES=${CYCLES:-1000}
-AGENTS=${AGENTS:-100}
+AGENTS=${AGENTS:-20}
 
 export OMP_NUM_THREADS=$THREADS
 

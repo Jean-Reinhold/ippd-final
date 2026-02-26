@@ -42,6 +42,10 @@ static void parse_args(int argc, char **argv, SimConfig *cfg) {
             cfg->tui_interval = atoi(argv[++i]);
         else if (strcmp(argv[i], "--tui-file") == 0 && i + 1 < argc)
             strncpy(cfg->tui_file, argv[++i], sizeof(cfg->tui_file) - 1);
+        else if (strcmp(argv[i], "-R") == 0 && i + 1 < argc)
+            cfg->reproduce_threshold = atof(argv[++i]);
+        else if (strcmp(argv[i], "-r") == 0 && i + 1 < argc)
+            cfg->reproduce_cost = atof(argv[++i]);
     }
 }
 
@@ -58,11 +62,14 @@ static void usage(const char *prog) {
         "  --no-tui          Disable TUI rendering\n"
         "  --tui-interval N  Render TUI every N cycles (default %d)\n"
         "  --tui-file PATH   Write TUI frames to file (for MPI compatibility)\n"
-        "  --csv             Output per-cycle timing as CSV to stdout\n",
+        "  --csv             Output per-cycle timing as CSV to stdout\n"
+        "  -R THRESHOLD      Energy threshold to reproduce (default %.1f)\n"
+        "  -r COST           Energy given to child / deducted from parent (default %.1f)\n",
         prog,
         DEFAULT_GLOBAL_W, DEFAULT_GLOBAL_H, DEFAULT_TOTAL_CYCLES,
         DEFAULT_SEASON_LENGTH, DEFAULT_NUM_AGENTS, DEFAULT_MAX_WORKLOAD,
-        (unsigned long long)DEFAULT_SEED, DEFAULT_TUI_INTERVAL);
+        (unsigned long long)DEFAULT_SEED, DEFAULT_TUI_INTERVAL,
+        DEFAULT_REPRODUCE_THRESHOLD, DEFAULT_REPRODUCE_COST);
 }
 
 int main(int argc, char **argv) {
@@ -99,6 +106,8 @@ int main(int argc, char **argv) {
         fprintf(info, "Season length: %d | Seed: %llu | Workload: %d\n",
                 cfg.season_length, (unsigned long long)cfg.seed,
                 cfg.max_workload);
+        fprintf(info, "Reproduce: threshold=%.2f cost=%.2f\n",
+                cfg.reproduce_threshold, cfg.reproduce_cost);
         fprintf(info, "TUI: %s (interval %d) | OMP threads: %d\n",
                 cfg.tui_enabled ? "on" : "off", cfg.tui_interval,
                 omp_get_max_threads());
@@ -133,9 +142,11 @@ int main(int argc, char **argv) {
                            (size_t)cfg.global_w * (size_t)cfg.global_h);
     }
 
+    int next_agent_id = cfg.num_agents;  /* IDs 0..num_agents-1 already used */
+
     TuiControl ctrl = { .state = TUI_RUNNING, .speed_ms = 100 };
 
-    if (cfg.tui_enabled && rank == 0)
+    if (cfg.tui_enabled && rank == 0 && !cfg.tui_file[0])
         tui_init_interactive();
 
     if (cfg.tui_file[0] && rank == 0)
@@ -149,7 +160,7 @@ int main(int argc, char **argv) {
     while (cycle < cfg.total_cycles && ctrl.state != TUI_QUIT) {
         int step_requested = 0;
 
-        if (rank == 0 && cfg.tui_enabled)
+        if (rank == 0 && cfg.tui_enabled && !cfg.tui_file[0])
             step_requested = tui_poll_input(&ctrl);
 
         MPI_Bcast(&ctrl, sizeof(ctrl), MPI_BYTE, 0, partition.cart_comm);
@@ -232,6 +243,11 @@ int main(int argc, char **argv) {
         agents_decide_all(agents, agent_count, &sg, season,
                           cfg.seed, cfg.energy_gain, cfg.energy_loss);
         local_perf.agent_time = MPI_Wtime() - t0;
+
+        /* Phase 4b: reproduction */
+        agents_reproduce(&agents, &agent_count, &agent_capacity,
+                         &next_agent_id, cfg.reproduce_threshold,
+                         cfg.reproduce_cost);
 
         /* Phase 5: grid regeneration */
         t0 = MPI_Wtime();
@@ -378,7 +394,7 @@ int main(int argc, char **argv) {
 
     double t_end = MPI_Wtime();
 
-    if (rank == 0 && cfg.tui_enabled)
+    if (rank == 0 && cfg.tui_enabled && !cfg.tui_file[0])
         tui_restore_terminal();
 
     if (rank == 0) {

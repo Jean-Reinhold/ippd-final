@@ -34,6 +34,8 @@ NP=2 THREADS=4 WIDTH=64 CYCLES=100 ./scripts/run.sh
 | `-a AGENTS`      | Número de agentes                 | 50      |
 | `-W WORKLOAD`    | Iterações máximas de workload     | 500000  |
 | `-S SEED`        | Seed do RNG                       | 42      |
+| `-R THRESHOLD`   | Energia para reprodução           | 2.0     |
+| `-r COST`        | Energia do filho                  | 1.0     |
 | `--no-tui`       | Desabilita a TUI                  | —       |
 | `--tui-interval N`| Renderiza a cada N ciclos        | 1       |
 | `--csv`          | Saída CSV de timing por ciclo     | —       |
@@ -125,6 +127,10 @@ cell.resource -= consumed
 agent.energy  += consumed
 ```
 
+### Reprodução
+
+Quando a energia de um agente ultrapassa `reproduce_threshold` (padrão 2.0), ele se reproduz: perde `reproduce_cost` (padrão 1.0) de energia e gera um filho na mesma posição com `energy = reproduce_cost`. Filhos não se reproduzem no mesmo ciclo. A reprodução aumenta a pressão competitiva sobre os recursos, criando dinâmicas de boom/bust ao invés de crescimento perpétuo de energia.
+
 ## Sistema de Estações
 
 As estações alternam a cada `season_length` ciclos (padrão: 10). A divisão inteira do ciclo pelo comprimento da estação determina o índice: par = seca, ímpar = chuva.
@@ -144,9 +150,9 @@ As estações alternam a cada `season_length` ciclos (padrão: 10). A divisão i
 | Tipo de célula | Seca | Chuva | Recurso máximo |
 |----------------|------|-------|----------------|
 | Aldeia         | 0.0  | 0.0   | 0.5            |
-| Pesca          | 0.3  | 0.1   | 1.0            |
-| Coleta         | 0.1  | 0.3   | 0.8            |
-| Roçado         | 0.2  | 0.4   | 0.9            |
+| Pesca          | 0.03 | 0.01  | 1.0            |
+| Coleta         | 0.01 | 0.03  | 0.8            |
+| Roçado         | 0.02 | 0.04  | 0.9            |
 | Interditada    | 0.0  | 0.0   | 0.0            |
 
 Fórmula de regeneração:
