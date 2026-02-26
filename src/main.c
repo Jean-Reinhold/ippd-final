@@ -36,6 +36,8 @@ static void parse_args(int argc, char **argv, SimConfig *cfg) {
             cfg->seed = (uint64_t)atoll(argv[++i]);
         else if (strcmp(argv[i], "--no-tui") == 0)
             cfg->tui_enabled = 0;
+        else if (strcmp(argv[i], "--csv") == 0)
+            cfg->csv_output = 1;
         else if (strcmp(argv[i], "--tui-interval") == 0 && i + 1 < argc)
             cfg->tui_interval = atoi(argv[++i]);
         else if (strcmp(argv[i], "--tui-file") == 0 && i + 1 < argc)
@@ -55,7 +57,8 @@ static void usage(const char *prog) {
         "  -S SEED           Random seed (default %llu)\n"
         "  --no-tui          Disable TUI rendering\n"
         "  --tui-interval N  Render TUI every N cycles (default %d)\n"
-        "  --tui-file PATH   Write TUI frames to file (for MPI compatibility)\n",
+        "  --tui-file PATH   Write TUI frames to file (for MPI compatibility)\n"
+        "  --csv             Output per-cycle timing as CSV to stdout\n",
         prog,
         DEFAULT_GLOBAL_W, DEFAULT_GLOBAL_H, DEFAULT_TOTAL_CYCLES,
         DEFAULT_SEASON_LENGTH, DEFAULT_NUM_AGENTS, DEFAULT_MAX_WORKLOAD,
@@ -88,17 +91,25 @@ int main(int argc, char **argv) {
     }
 
     if (rank == 0) {
-        printf("=== IPPD Simulation ===\n");
-        printf("Grid: %dx%d | Cycles: %d | Agents: %d | Ranks: %d\n",
-               cfg.global_w, cfg.global_h, cfg.total_cycles,
-               cfg.num_agents, size);
-        printf("Season length: %d | Seed: %llu | Workload: %d\n",
-               cfg.season_length, (unsigned long long)cfg.seed,
-               cfg.max_workload);
-        printf("TUI: %s (interval %d) | OMP threads: %d\n",
-               cfg.tui_enabled ? "on" : "off", cfg.tui_interval,
-               omp_get_max_threads());
-        printf("=======================\n");
+        FILE *info = cfg.csv_output ? stderr : stdout;
+        fprintf(info, "=== IPPD Simulation ===\n");
+        fprintf(info, "Grid: %dx%d | Cycles: %d | Agents: %d | Ranks: %d\n",
+                cfg.global_w, cfg.global_h, cfg.total_cycles,
+                cfg.num_agents, size);
+        fprintf(info, "Season length: %d | Seed: %llu | Workload: %d\n",
+                cfg.season_length, (unsigned long long)cfg.seed,
+                cfg.max_workload);
+        fprintf(info, "TUI: %s (interval %d) | OMP threads: %d\n",
+                cfg.tui_enabled ? "on" : "off", cfg.tui_interval,
+                omp_get_max_threads());
+        fprintf(info, "=======================\n");
+
+        if (cfg.csv_output) {
+            printf("cycle,season,compute_ms,halo_ms,migrate_ms,"
+                   "metrics_ms,cycle_ms,alive_agents,total_resource,"
+                   "avg_energy,load_balance,comm_compute\n");
+            fflush(stdout);
+        }
     }
 
     Partition partition;
@@ -321,6 +332,49 @@ int main(int argc, char **argv) {
                 MPI_Reduce(&agent_count, &max_agents, 1, MPI_INT,
                            MPI_MAX, 0, partition.cart_comm);
             }
+        } else if (cfg.csv_output) {
+            /* CSV mode: lightweight per-cycle perf without TUI gathering. */
+            local_perf.cycle_time = MPI_Wtime() - t_cycle_start;
+
+            CyclePerf global_perf = {0};
+            MPI_Reduce(&local_perf.cycle_time,   &global_perf.cycle_time,
+                       1, MPI_DOUBLE, MPI_MAX, 0, partition.cart_comm);
+            MPI_Reduce(&local_perf.compute_time,  &global_perf.compute_time,
+                       1, MPI_DOUBLE, MPI_MAX, 0, partition.cart_comm);
+            MPI_Reduce(&local_perf.halo_time,     &global_perf.halo_time,
+                       1, MPI_DOUBLE, MPI_MAX, 0, partition.cart_comm);
+            MPI_Reduce(&local_perf.migrate_time,  &global_perf.migrate_time,
+                       1, MPI_DOUBLE, MPI_MAX, 0, partition.cart_comm);
+            MPI_Reduce(&local_perf.metrics_time,  &global_perf.metrics_time,
+                       1, MPI_DOUBLE, MPI_MAX, 0, partition.cart_comm);
+
+            int min_agents, max_agents;
+            MPI_Reduce(&agent_count, &min_agents, 1, MPI_INT,
+                       MPI_MIN, 0, partition.cart_comm);
+            MPI_Reduce(&agent_count, &max_agents, 1, MPI_INT,
+                       MPI_MAX, 0, partition.cart_comm);
+
+            if (rank == 0) {
+                double lb = (max_agents > 0)
+                    ? (double)min_agents / (double)max_agents : 1.0;
+                double cc = (global_perf.compute_time > 0.0)
+                    ? (global_perf.halo_time + global_perf.migrate_time
+                       + global_perf.metrics_time)
+                      / global_perf.compute_time
+                    : 0.0;
+                printf("%d,%s,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%.1f,%.3f,%.4f,%.4f\n",
+                       cycle,
+                       season == DRY ? "dry" : "wet",
+                       global_perf.compute_time  * 1000.0,
+                       global_perf.halo_time     * 1000.0,
+                       global_perf.migrate_time  * 1000.0,
+                       global_perf.metrics_time  * 1000.0,
+                       global_perf.cycle_time    * 1000.0,
+                       global_metrics.alive_agents,
+                       global_metrics.total_resource,
+                       global_metrics.avg_energy,
+                       lb, cc);
+            }
         }
 
         cycle++;
@@ -337,14 +391,15 @@ int main(int argc, char **argv) {
         metrics_reduce_global(&final_local, &final_global,
                               partition.cart_comm);
 
-        printf("\n=== Simulation Complete ===\n");
-        printf("Total time:     %.3f s\n", t_end - t_start);
-        printf("Total resource: %.1f\n", final_global.total_resource);
-        printf("Alive agents:   %d\n", final_global.alive_agents);
-        printf("Avg energy:     %.3f\n", final_global.avg_energy);
-        printf("Max energy:     %.3f\n", final_global.max_energy);
-        printf("Min energy:     %.3f\n", final_global.min_energy);
-        printf("===========================\n");
+        FILE *info = cfg.csv_output ? stderr : stdout;
+        fprintf(info, "\n=== Simulation Complete ===\n");
+        fprintf(info, "Total time:     %.3f s\n", t_end - t_start);
+        fprintf(info, "Total resource: %.1f\n", final_global.total_resource);
+        fprintf(info, "Alive agents:   %d\n", final_global.alive_agents);
+        fprintf(info, "Avg energy:     %.3f\n", final_global.avg_energy);
+        fprintf(info, "Max energy:     %.3f\n", final_global.max_energy);
+        fprintf(info, "Min energy:     %.3f\n", final_global.min_energy);
+        fprintf(info, "===========================\n");
     } else {
         /* Ranks não-zero participam da redução final. */
         SimMetrics final_local, final_global;

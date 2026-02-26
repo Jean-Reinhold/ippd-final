@@ -30,7 +30,8 @@
     .initial_energy  = DEFAULT_INITIAL_ENERGY,  \
     .seed            = DEFAULT_SEED,            \
     .tui_enabled     = DEFAULT_TUI_ENABLED,     \
-    .tui_interval    = DEFAULT_TUI_INTERVAL     \
+    .tui_interval    = DEFAULT_TUI_INTERVAL,    \
+    .csv_output      = 0                        \
 }
 
 #endif /* CONFIG_H */
