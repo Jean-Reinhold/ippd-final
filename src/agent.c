@@ -101,7 +101,7 @@ void agent_decide(Agent *a, SubGrid *sg, Season season, RngState *rng,
             double consumed = (energy_gain < cell->resource)
                               ? energy_gain : cell->resource;
             cell->resource -= consumed;
-            a->energy += energy_gain;
+            a->energy += consumed;
         } else {
             a->energy -= energy_loss;
         }
@@ -116,9 +116,8 @@ void agent_decide(Agent *a, SubGrid *sg, Season season, RngState *rng,
 /* ------------------------------------------------------------------ */
 
 void agents_process(Agent *agents, int count, SubGrid *sg,
-                    Season season, int max_workload, uint64_t seed) {
-    double energy_gain = DEFAULT_ENERGY_GAIN;
-    double energy_loss = DEFAULT_ENERGY_LOSS;
+                    Season season, int max_workload, uint64_t seed,
+                    double energy_gain, double energy_loss) {
 
     #pragma omp parallel
     {

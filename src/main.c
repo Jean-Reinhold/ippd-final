@@ -136,6 +136,8 @@ int main(int argc, char **argv) {
 
     double t_start = MPI_Wtime();
     int cycle = 0;
+    CyclePerf last_perf = {0};
+    int have_last_perf = 0;
 
     while (cycle < cfg.total_cycles && ctrl.state != TUI_QUIT) {
         int step_requested = 0;
@@ -172,7 +174,9 @@ int main(int argc, char **argv) {
                            all_agents, total_agents,
                            cycle, cfg.total_cycles,
                            season_for_cycle(cycle, cfg.season_length),
-                           &global_m, NULL, &ctrl);
+                           &global_m,
+                           have_last_perf ? &last_perf : NULL,
+                           &ctrl);
                 free(all_agents);
                 usleep(50000); /* 50ms poll interval to avoid busy-wait */
             } else {
@@ -218,7 +222,8 @@ int main(int argc, char **argv) {
         /* 7.6 — Agent processing (decision-making + workload) */
         t0 = MPI_Wtime();
         agents_process(agents, agent_count, &sg, season,
-                       cfg.max_workload, cfg.seed);
+                       cfg.max_workload, cfg.seed,
+                       cfg.energy_gain, cfg.energy_loss);
 
         /* 7.8 — Subgrid resource update (regeneration) */
         subgrid_update(&sg, season);
@@ -294,6 +299,9 @@ int main(int argc, char **argv) {
                            cycle, cfg.total_cycles,
                            season, &global_metrics,
                            &global_perf, &ctrl);
+
+                last_perf = global_perf;
+                have_last_perf = 1;
 
                 free(all_agents);
                 usleep((unsigned int)(ctrl.speed_ms * 1000));

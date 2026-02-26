@@ -119,14 +119,14 @@ int tui_poll_input(TuiControl *ctrl) {
             ctrl->state = TUI_PAUSED;
             return 1;  /* step requested */
         case '+': case '=':
-            ctrl->speed_ms += SPEED_STEP_MS;
-            if (ctrl->speed_ms > SPEED_MAX_MS)
-                ctrl->speed_ms = SPEED_MAX_MS;
-            break;
-        case '-':
             ctrl->speed_ms -= SPEED_STEP_MS;
             if (ctrl->speed_ms < SPEED_MIN_MS)
                 ctrl->speed_ms = SPEED_MIN_MS;
+            break;
+        case '-':
+            ctrl->speed_ms += SPEED_STEP_MS;
+            if (ctrl->speed_ms > SPEED_MAX_MS)
+                ctrl->speed_ms = SPEED_MAX_MS;
             break;
         case 'q': case 'Q':
             ctrl->state = TUI_QUIT;
@@ -208,10 +208,28 @@ static void format_box_bottom(char *buf, size_t bufsz, int inner_w) {
     snprintf(buf + pos, bufsz - (size_t)pos, "%s", BOX_BR);
 }
 
+/* ── Count display columns for a UTF-8 string (no ANSI escapes) ── */
+/* Each ASCII byte (0x00–0x7F) = 1 column.  Each multi-byte sequence
+ * (leading byte 0xC0+ followed by continuation bytes 0x80–0xBF) = 1 column. */
+static int utf8_display_width(const char *s) {
+    int width = 0;
+    for (const unsigned char *p = (const unsigned char *)s; *p; ) {
+        if (*p < 0x80) {
+            width++;
+            p++;
+        } else {
+            /* Skip leading byte + all continuation bytes → 1 column */
+            width++;
+            p++;
+            while (*p >= 0x80 && *p < 0xC0) p++;
+        }
+    }
+    return width;
+}
+
 /* ── Pad or truncate a line to exactly `width` visible characters ── */
-/* Assumes input is plain ASCII (no ANSI escapes in rpanel content lines). */
 static void format_box_line(char *buf, size_t bufsz, const char *content, int inner_w) {
-    int clen = (int)strlen(content);
+    int clen = utf8_display_width(content);
     int pad = inner_w - clen;
     if (pad < 0) pad = 0;
     int pos = 0;
@@ -266,7 +284,11 @@ void tui_render(Cell *full_grid, int global_w, int global_h,
     int inner_w = RPANEL_W - 2;  /* minus left/right box chars */
 
     /* ── Performance panel ── */
-    format_box_top(rpanel[rcount++], 256, "Performance", inner_w);
+    {
+        const char *perf_title = (ctrl && ctrl->state == TUI_PAUSED)
+                                 ? "Performance (paused)" : "Performance";
+        format_box_top(rpanel[rcount++], 256, perf_title, inner_w);
+    }
 
     if (perf) {
         char tmp[128];
@@ -312,7 +334,7 @@ void tui_render(Cell *full_grid, int global_w, int global_h,
         snprintf(tmp, sizeof(tmp), " Comm/Compute: %5.1f%%", perf->comm_compute * 100.0);
         format_box_line(rpanel[rcount++], 256, tmp, inner_w);
     } else {
-        format_box_line(rpanel[rcount++], 256, " (paused)", inner_w);
+        format_box_line(rpanel[rcount++], 256, " (no data yet)", inner_w);
     }
     format_box_bottom(rpanel[rcount++], 256, inner_w);
 
@@ -351,10 +373,16 @@ void tui_render(Cell *full_grid, int global_w, int global_h,
         format_box_top(rpanel[rcount++], 256, "Controls", inner_w);
         {
             char tmp[128];
-            const char *label = (ctrl->state == TUI_RUNNING) ? "RUNNING" : "PAUSED ";
-            snprintf(tmp, sizeof(tmp), " %s %s [%dms]",
+            const char *state_label = (ctrl->state == TUI_RUNNING) ? "RUNNING" : "PAUSED ";
+            const char *speed_label;
+            if      (ctrl->speed_ms <= 25)  speed_label = "Fastest";
+            else if (ctrl->speed_ms <= 75)  speed_label = "Fast";
+            else if (ctrl->speed_ms <= 150) speed_label = "Normal";
+            else if (ctrl->speed_ms <= 500) speed_label = "Slow";
+            else                            speed_label = "Slowest";
+            snprintf(tmp, sizeof(tmp), " %s %s [%dms %s]",
                      (ctrl->state == TUI_RUNNING) ? ICON_PLAY : ICON_PAUSE,
-                     label, ctrl->speed_ms);
+                     state_label, ctrl->speed_ms, speed_label);
             format_box_line(rpanel[rcount++], 256, tmp, inner_w);
 
             snprintf(tmp, sizeof(tmp), " SPC:%s N:step +/-:spd Q:quit",
@@ -371,7 +399,10 @@ void tui_render(Cell *full_grid, int global_w, int global_h,
     /* Grid box top: ┌─ Grid ─...─┐ */
     {
         char grid_top[256];
-        format_box_top(grid_top, sizeof(grid_top), "Grid", grid_tcols);
+        char grid_title[64];
+        snprintf(grid_title, sizeof(grid_title), "Grid [Cycle %d/%d %s]",
+                 cycle, total_cycles, season_name(season));
+        format_box_top(grid_top, sizeof(grid_top), grid_title, grid_tcols);
         printf("%s", grid_top);
         /* Space between panels */
         if (rcount > 0)
@@ -430,6 +461,18 @@ void tui_render(Cell *full_grid, int global_w, int global_h,
             printf(" %s", rpanel[rline]);
         printf("\n");
     }
+
+    /* Color legend below the grid */
+    printf(" ");
+    const char *legend_bg[] = {
+        "\033[48;5;127m", "\033[48;5;27m", "\033[48;5;28m",
+        "\033[48;5;136m", "\033[48;5;124m"
+    };
+    const char *legend_lbl[] = { "A", "P", "C", "R", "X" };
+    for (int i = 0; i < 5; i++)
+        printf(" %s %s " ANSI_RESET, legend_bg[i], legend_lbl[i]);
+    printf("  " BG_INACCESSIBLE "\033[38;5;242m" MIDDLE_DOT MIDDLE_DOT ANSI_RESET ":closed");
+    printf("  " FG_AGENT ANSI_BOLD BULLET ANSI_RESET ":agent\n");
 
     /* Any remaining rpanel lines that didn't fit beside the grid */
     for (int rline = display_h + 2; rline < rcount; rline++) {

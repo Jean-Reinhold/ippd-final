@@ -32,6 +32,7 @@ void agent_decide(Agent *a, SubGrid *sg, Season season, RngState *rng,
  * agent_decide.  Migration is handled externally by migrate_agents().
  */
 void agents_process(Agent *agents, int count, SubGrid *sg,
-                    Season season, int max_workload, uint64_t seed);
+                    Season season, int max_workload, uint64_t seed,
+                    double energy_gain, double energy_loss);
 
 #endif /* AGENT_H */
