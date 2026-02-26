@@ -1,0 +1,12 @@
+# Build artifacts
+build/
+sim
+test_unit
+test_mpi_*
+
+# Object files
+*.o
+*.a
+
+# OS files
+.DS_Store
