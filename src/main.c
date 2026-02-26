@@ -170,8 +170,9 @@ int main(int argc, char **argv) {
 
                 tui_render(full_grid, cfg.global_w, cfg.global_h,
                            all_agents, total_agents,
-                           cycle, season_for_cycle(cycle, cfg.season_length),
-                           &global_m, &ctrl);
+                           cycle, cfg.total_cycles,
+                           season_for_cycle(cycle, cfg.season_length),
+                           &global_m, NULL, &ctrl);
                 free(all_agents);
                 usleep(50000); /* 50ms poll interval to avoid busy-wait */
             } else {
@@ -195,6 +196,8 @@ int main(int argc, char **argv) {
         }
 
         /* ── Execute one simulation cycle ── */
+        double t_cycle_start = MPI_Wtime();
+        CyclePerf local_perf = {0};
 
         /* 7.4 — Season update + broadcast + update cell accessibility */
         Season season = season_for_cycle(cycle, cfg.season_length);
@@ -208,30 +211,40 @@ int main(int argc, char **argv) {
         }
 
         /* 7.5 — Halo exchange */
+        double t0 = MPI_Wtime();
         halo_exchange(&sg, &partition);
+        local_perf.halo_time = MPI_Wtime() - t0;
 
         /* 7.6 — Agent processing (decision-making + workload) */
+        t0 = MPI_Wtime();
         agents_process(agents, agent_count, &sg, season,
                        cfg.max_workload, cfg.seed);
 
-        /* 7.7 — Agent migration between ranks */
-        migrate_agents(&agents, &agent_count, &agent_capacity,
-                       &partition, &sg, cfg.global_w, cfg.global_h);
-
         /* 7.8 — Subgrid resource update (regeneration) */
         subgrid_update(&sg, season);
+        local_perf.compute_time = MPI_Wtime() - t0;
+
+        /* 7.7 — Agent migration between ranks */
+        t0 = MPI_Wtime();
+        migrate_agents(&agents, &agent_count, &agent_capacity,
+                       &partition, &sg, cfg.global_w, cfg.global_h);
+        local_perf.migrate_time = MPI_Wtime() - t0;
 
         /* 7.9 — Metrics */
+        t0 = MPI_Wtime();
         SimMetrics local_metrics, global_metrics;
         metrics_compute_local(&sg, agents, agent_count, &local_metrics);
         metrics_reduce_global(&local_metrics, &global_metrics,
                               partition.cart_comm);
+        local_perf.metrics_time = MPI_Wtime() - t0;
 
         /* 7.10 — TUI rendering (rank 0 only, at intervals) */
-        if (cfg.tui_enabled &&
+        int do_render = cfg.tui_enabled &&
             (cycle % cfg.tui_interval == 0 ||
-             cycle == cfg.total_cycles - 1)) {
+             cycle == cfg.total_cycles - 1);
 
+        t0 = MPI_Wtime();
+        if (do_render) {
             if (rank == 0) {
                 tui_gather_grid(&sg, &partition, full_grid,
                                 cfg.global_w, cfg.global_h,
@@ -242,9 +255,45 @@ int main(int argc, char **argv) {
                 tui_gather_agents(agents, agent_count, &all_agents,
                                   &total_agents, partition.cart_comm);
 
+                local_perf.render_time = MPI_Wtime() - t0;
+                local_perf.cycle_time = MPI_Wtime() - t_cycle_start;
+
+                /* Reduce perf data: MPI_MAX for timings (bottleneck rank) */
+                CyclePerf global_perf = {0};
+                MPI_Reduce(&local_perf.cycle_time,   &global_perf.cycle_time,
+                           1, MPI_DOUBLE, MPI_MAX, 0, partition.cart_comm);
+                MPI_Reduce(&local_perf.compute_time,  &global_perf.compute_time,
+                           1, MPI_DOUBLE, MPI_MAX, 0, partition.cart_comm);
+                MPI_Reduce(&local_perf.halo_time,     &global_perf.halo_time,
+                           1, MPI_DOUBLE, MPI_MAX, 0, partition.cart_comm);
+                MPI_Reduce(&local_perf.migrate_time,  &global_perf.migrate_time,
+                           1, MPI_DOUBLE, MPI_MAX, 0, partition.cart_comm);
+                MPI_Reduce(&local_perf.metrics_time,  &global_perf.metrics_time,
+                           1, MPI_DOUBLE, MPI_MAX, 0, partition.cart_comm);
+                MPI_Reduce(&local_perf.render_time,   &global_perf.render_time,
+                           1, MPI_DOUBLE, MPI_MAX, 0, partition.cart_comm);
+
+                /* Load balance: min/max agent count across ranks */
+                int min_agents, max_agents;
+                MPI_Reduce(&agent_count, &min_agents, 1, MPI_INT,
+                           MPI_MIN, 0, partition.cart_comm);
+                MPI_Reduce(&agent_count, &max_agents, 1, MPI_INT,
+                           MPI_MAX, 0, partition.cart_comm);
+
+                global_perf.load_balance = (max_agents > 0)
+                    ? (double)min_agents / (double)max_agents : 1.0;
+                global_perf.comm_compute = (global_perf.compute_time > 0.0)
+                    ? (global_perf.halo_time + global_perf.migrate_time
+                       + global_perf.metrics_time) / global_perf.compute_time
+                    : 0.0;
+                global_perf.mpi_size    = size;
+                global_perf.omp_threads = omp_get_max_threads();
+
                 tui_render(full_grid, cfg.global_w, cfg.global_h,
                            all_agents, total_agents,
-                           cycle, season, &global_metrics, &ctrl);
+                           cycle, cfg.total_cycles,
+                           season, &global_metrics,
+                           &global_perf, &ctrl);
 
                 free(all_agents);
                 usleep((unsigned int)(ctrl.speed_ms * 1000));
@@ -257,6 +306,30 @@ int main(int argc, char **argv) {
                 tui_gather_agents(agents, agent_count, &dummy,
                                   &dummy_count, partition.cart_comm);
                 free(dummy);
+
+                local_perf.render_time = MPI_Wtime() - t0;
+                local_perf.cycle_time = MPI_Wtime() - t_cycle_start;
+
+                /* Non-zero ranks participate in perf reductions */
+                CyclePerf global_perf = {0};
+                MPI_Reduce(&local_perf.cycle_time,   &global_perf.cycle_time,
+                           1, MPI_DOUBLE, MPI_MAX, 0, partition.cart_comm);
+                MPI_Reduce(&local_perf.compute_time,  &global_perf.compute_time,
+                           1, MPI_DOUBLE, MPI_MAX, 0, partition.cart_comm);
+                MPI_Reduce(&local_perf.halo_time,     &global_perf.halo_time,
+                           1, MPI_DOUBLE, MPI_MAX, 0, partition.cart_comm);
+                MPI_Reduce(&local_perf.migrate_time,  &global_perf.migrate_time,
+                           1, MPI_DOUBLE, MPI_MAX, 0, partition.cart_comm);
+                MPI_Reduce(&local_perf.metrics_time,  &global_perf.metrics_time,
+                           1, MPI_DOUBLE, MPI_MAX, 0, partition.cart_comm);
+                MPI_Reduce(&local_perf.render_time,   &global_perf.render_time,
+                           1, MPI_DOUBLE, MPI_MAX, 0, partition.cart_comm);
+
+                int min_agents, max_agents;
+                MPI_Reduce(&agent_count, &min_agents, 1, MPI_INT,
+                           MPI_MIN, 0, partition.cart_comm);
+                MPI_Reduce(&agent_count, &max_agents, 1, MPI_INT,
+                           MPI_MAX, 0, partition.cart_comm);
             }
         }
 
