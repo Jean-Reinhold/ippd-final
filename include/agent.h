@@ -27,9 +27,23 @@ void agent_decide(Agent *a, SubGrid *sg, Season season, RngState *rng,
                   double energy_gain, double energy_loss);
 
 /*
+ * Executa a carga sintética (workload_compute) para todos os agentes vivos.
+ * Apenas o busy-loop, sem RNG — pode ser cronometrado separadamente.
+ */
+void agents_workload(Agent *agents, int count, SubGrid *sg, int max_workload);
+
+/*
+ * Executa a lógica de decisão (agent_decide) para todos os agentes vivos.
+ * Requer PRNG per-thread para desempate por reservoir sampling.
+ */
+void agents_decide_all(Agent *agents, int count, SubGrid *sg,
+                       Season season, uint64_t seed,
+                       double energy_gain, double energy_loss);
+
+/*
  * Processa todos os agentes vivos em paralelo (OpenMP).
- * Para cada agente: executa workload_compute na célula atual,
- * depois agent_decide. Migração é tratada externamente por migrate_agents().
+ * Wrapper que chama agents_workload + agents_decide_all em sequência.
+ * Mantido para compatibilidade com testes existentes.
  */
 void agents_process(Agent *agents, int count, SubGrid *sg,
                     Season season, int max_workload, uint64_t seed,

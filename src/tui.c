@@ -276,7 +276,7 @@ void tui_render(Cell *full_grid, int global_w, int global_h,
         }
     }
 
-    #define MAX_RPANEL_LINES 24
+    #define MAX_RPANEL_LINES 28
     char rpanel[MAX_RPANEL_LINES][256];
     int rcount = 0;  /* number of rpanel lines */
 
@@ -293,8 +293,11 @@ void tui_render(Cell *full_grid, int global_w, int global_h,
         snprintf(tmp, sizeof(tmp), " Cycle Time: %7.1fms         ", perf->cycle_time * 1000.0);
         format_box_line(rpanel[rcount++], 256, tmp, inner_w);
 
-        double ct_ms = perf->compute_time  * 1000.0;
+        double ss_ms = perf->season_time   * 1000.0;
         double ht_ms = perf->halo_time     * 1000.0;
+        double wl_ms = perf->workload_time * 1000.0;
+        double ag_ms = perf->agent_time    * 1000.0;
+        double gr_ms = perf->grid_time     * 1000.0;
         double mt_ms = perf->migrate_time  * 1000.0;
         double me_ms = perf->metrics_time  * 1000.0;
         double rt_ms = perf->render_time   * 1000.0;
@@ -307,11 +310,14 @@ void tui_render(Cell *full_grid, int global_w, int global_h,
             format_box_line(rpanel[rcount++], 256, tmp, inner_w);      \
         } while(0)
 
-        PHASE_LINE("\xe2\x94\x9c\xe2\x94\x80 Compute: ", ct_ms);
-        PHASE_LINE("\xe2\x94\x9c\xe2\x94\x80 Halo Exch:", ht_ms);
-        PHASE_LINE("\xe2\x94\x9c\xe2\x94\x80 Migration:", mt_ms);
-        PHASE_LINE("\xe2\x94\x9c\xe2\x94\x80 Metrics:  ", me_ms);
-        PHASE_LINE("\xe2\x94\x94\xe2\x94\x80 Render:   ", rt_ms);
+        PHASE_LINE("\xe2\x94\x9c\xe2\x94\x80 Season:  ", ss_ms);
+        PHASE_LINE("\xe2\x94\x9c\xe2\x94\x80 Halo:    ", ht_ms);
+        PHASE_LINE("\xe2\x94\x9c\xe2\x94\x80 Workload:", wl_ms);
+        PHASE_LINE("\xe2\x94\x9c\xe2\x94\x80 Agent:   ", ag_ms);
+        PHASE_LINE("\xe2\x94\x9c\xe2\x94\x80 Grid:    ", gr_ms);
+        PHASE_LINE("\xe2\x94\x9c\xe2\x94\x80 Migrate: ", mt_ms);
+        PHASE_LINE("\xe2\x94\x9c\xe2\x94\x80 Metrics: ", me_ms);
+        PHASE_LINE("\xe2\x94\x94\xe2\x94\x80 Render:  ", rt_ms);
         #undef PHASE_LINE
 
         format_box_line(rpanel[rcount++], 256, "", inner_w);
