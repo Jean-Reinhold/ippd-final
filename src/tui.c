@@ -132,7 +132,8 @@ static const char *intensity_code(double resource, double max_resource) {
 /* ── Render ── */
 void tui_render(Cell *full_grid, int global_w, int global_h,
                 Agent *all_agents, int total_agents,
-                int cycle, Season season, SimMetrics *metrics)
+                int cycle, Season season, SimMetrics *metrics,
+                TuiControl *ctrl)
 {
     /* Compute downsampling step if grid is too large */
     int step_x = 1, step_y = 1;
