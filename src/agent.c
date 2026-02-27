@@ -81,23 +81,28 @@ void agent_decide(Agent *a, SubGrid *sg, Season season, RngState *rng,
     a->gx += dx[best_dir];
     a->gy += dy[best_dir];
 
+    /* Consumo de recurso: apenas se o destino está dentro do subgrid
+     * local (interior, não halo).  Agentes que migram para outro rank
+     * não consomem neste ciclo (algoritmo §4, passo 5.3). */
     int new_lc = a->gx - sg->offset_x + 1;
     int new_lr = a->gy - sg->offset_y + 1;
 
-    if (new_lc >= 0 && new_lc < sg->halo_w &&
-        new_lr >= 0 && new_lr < sg->halo_h) {
+    if (new_lc >= 1 && new_lc <= sg->local_w &&
+        new_lr >= 1 && new_lr <= sg->local_h) {
+        /* Destino local — consumir recurso ou perder energia. */
         Cell *cell = &sg->cells[CELL_AT(sg, new_lr, new_lc)];
         if (cell->accessible && cell->resource > 0.0) {
             double consumed = (energy_gain < cell->resource)
                               ? energy_gain : cell->resource;
+            #pragma omp atomic
             cell->resource -= consumed;
             a->energy += consumed;
         } else {
             a->energy -= energy_loss;
         }
-    } else {
-        a->energy -= energy_loss;
     }
+    /* Destino fora do subgrid local (halo) — agente será migrado;
+     * não consome nem perde energia durante a transição. */
 
     if (a->energy <= 0.0)
         a->alive = 0;
@@ -142,11 +147,9 @@ void agents_reproduce(Agent **agents, int *count, int *capacity,
                       int *next_id, double threshold, double cost) {
     Agent *ag = *agents;
     int n = *count;
-    /* Scan only the current population (children don't reproduce this cycle) */
     for (int i = 0; i < n; i++) {
         if (!ag[i].alive || ag[i].energy <= threshold) continue;
         ag[i].energy -= cost;
-        /* Grow if needed */
         if (*count >= *capacity) {
             int new_cap = *capacity ? *capacity * 2 : 16;
             ag = realloc(ag, sizeof(Agent) * (size_t)new_cap);

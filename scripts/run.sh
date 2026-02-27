@@ -16,8 +16,8 @@ set -e
 
 cd "$(dirname "$0")/.."
 
-NP=${NP:-5}
-THREADS=${THREADS:-12}
+NP=${NP:-2}
+THREADS=${THREADS:-2}
 WIDTH=${WIDTH:-80}
 HEIGHT=${HEIGHT:-80}
 CYCLES=${CYCLES:-1000}
