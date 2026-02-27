@@ -147,11 +147,9 @@ void agents_reproduce(Agent **agents, int *count, int *capacity,
                       int *next_id, double threshold, double cost) {
     Agent *ag = *agents;
     int n = *count;
-    /* Scan only the current population (children don't reproduce this cycle) */
     for (int i = 0; i < n; i++) {
         if (!ag[i].alive || ag[i].energy <= threshold) continue;
         ag[i].energy -= cost;
-        /* Grow if needed */
         if (*count >= *capacity) {
             int new_cap = *capacity ? *capacity * 2 : 16;
             ag = realloc(ag, sizeof(Agent) * (size_t)new_cap);
