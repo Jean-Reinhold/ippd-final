@@ -103,10 +103,24 @@ void agent_decide(Agent *a, SubGrid *sg, Season season, RngState *rng,
         a->alive = 0;
 }
 
-void agents_process(Agent *agents, int count, SubGrid *sg,
-                    Season season, int max_workload, uint64_t seed,
-                    double energy_gain, double energy_loss) {
+void agents_workload(Agent *agents, int count, SubGrid *sg, int max_workload) {
+    #pragma omp parallel for schedule(dynamic, 32)
+    for (int i = 0; i < count; i++) {
+        if (!agents[i].alive) continue;
 
+        int lc = agents[i].gx - sg->offset_x + 1;
+        int lr = agents[i].gy - sg->offset_y + 1;
+        if (lc >= 1 && lc <= sg->local_w &&
+            lr >= 1 && lr <= sg->local_h) {
+            int idx = CELL_AT(sg, lr, lc);
+            workload_compute(sg->cells[idx].resource, max_workload);
+        }
+    }
+}
+
+void agents_decide_all(Agent *agents, int count, SubGrid *sg,
+                       Season season, uint64_t seed,
+                       double energy_gain, double energy_loss) {
     #pragma omp parallel
     {
         int tid = 0;
@@ -118,17 +132,42 @@ void agents_process(Agent *agents, int count, SubGrid *sg,
         #pragma omp for schedule(dynamic, 32)
         for (int i = 0; i < count; i++) {
             if (!agents[i].alive) continue;
-
-            int lc = agents[i].gx - sg->offset_x + 1;
-            int lr = agents[i].gy - sg->offset_y + 1;
-            if (lc >= 1 && lc <= sg->local_w &&
-                lr >= 1 && lr <= sg->local_h) {
-                int idx = CELL_AT(sg, lr, lc);
-                workload_compute(sg->cells[idx].resource, max_workload);
-            }
-
             agent_decide(&agents[i], sg, season, &rng,
                          energy_gain, energy_loss);
         }
     }
+}
+
+void agents_reproduce(Agent **agents, int *count, int *capacity,
+                      int *next_id, double threshold, double cost) {
+    Agent *ag = *agents;
+    int n = *count;
+    /* Scan only the current population (children don't reproduce this cycle) */
+    for (int i = 0; i < n; i++) {
+        if (!ag[i].alive || ag[i].energy <= threshold) continue;
+        ag[i].energy -= cost;
+        /* Grow if needed */
+        if (*count >= *capacity) {
+            int new_cap = *capacity ? *capacity * 2 : 16;
+            ag = realloc(ag, sizeof(Agent) * (size_t)new_cap);
+            *agents = ag;
+            *capacity = new_cap;
+        }
+        Agent *child = &ag[*count];
+        child->id     = (*next_id)++;
+        child->gx     = ag[i].gx;
+        child->gy     = ag[i].gy;
+        child->energy  = cost;
+        child->alive   = 1;
+        (*count)++;
+    }
+    *agents = ag;
+}
+
+void agents_process(Agent *agents, int count, SubGrid *sg,
+                    Season season, int max_workload, uint64_t seed,
+                    double energy_gain, double energy_loss) {
+    agents_workload(agents, count, sg, max_workload);
+    agents_decide_all(agents, count, sg, season, seed,
+                      energy_gain, energy_loss);
 }

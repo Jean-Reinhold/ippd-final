@@ -61,9 +61,12 @@ typedef struct {
     double   energy_gain;
     double   energy_loss;
     double   initial_energy;
+    double   reproduce_threshold;  /* energy needed to reproduce */
+    double   reproduce_cost;       /* energy given to child (deducted from parent) */
     uint64_t seed;
     int      tui_enabled;
     int      tui_interval;
+    int      csv_output;
     char     tui_file[256];
 } SimConfig;
 

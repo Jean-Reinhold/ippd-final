@@ -23,18 +23,18 @@ double season_regen_rate(CellType type, Season s) {
     /*
      * Taxas de regeneração (seca / chuva):
      *   ALDEIA      0.0 / 0.0   (sem regeneração natural)
-     *   PESCA       0.3 / 0.1   (peixes prosperam na seca)
-     *   COLETA      0.1 / 0.3   (coleta melhora na chuva)
-     *   ROCADO      0.2 / 0.4   (roçado beneficia da chuva)
+     *   PESCA       0.03 / 0.01  (peixes prosperam na seca)
+     *   COLETA      0.01 / 0.03  (coleta melhora na chuva)
+     *   ROCADO      0.02 / 0.04  (roçado beneficia da chuva)
      *   INTERDITADA 0.0 / 0.0   (sem regeneração)
      */
     static const double rates[5][2] = {
-        /* DRY   WET */
-        { 0.0,  0.0 },   /* ALDEIA */
-        { 0.3,  0.1 },   /* PESCA */
-        { 0.1,  0.3 },   /* COLETA */
-        { 0.2,  0.4 },   /* ROCADO */
-        { 0.0,  0.0 },   /* INTERDITADA */
+        /* DRY    WET */
+        { 0.00,  0.00 },   /* ALDEIA */
+        { 0.03,  0.01 },   /* PESCA  (was 0.3, 0.1) */
+        { 0.01,  0.03 },   /* COLETA (was 0.1, 0.3) */
+        { 0.02,  0.04 },   /* ROCADO (was 0.2, 0.4) */
+        { 0.00,  0.00 },   /* INTERDITADA */
     };
     return rates[type][s];
 }

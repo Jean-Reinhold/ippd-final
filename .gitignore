@@ -8,5 +8,8 @@ test_mpi_*
 *.o
 *.a
 
+# Benchmark output
+benchmark_results*/
+
 # OS files
 .DS_Store
