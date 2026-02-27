@@ -25,7 +25,7 @@ void agents_init(Agent *agents, int *count, int num_total,
      * resultado idêntico independentemente do número de ranks MPI.
      */
     *count = 0;
-    RngState grng = rng_seed(seed ^ 0xA6E47ULL);
+    RngState grng = rng_seed(seed ^ 0xA6E47ULL);    // RNG global para posicionamento inicial
 
     for (int i = 0; i < num_total; i++) {
         int gx = (int)(rng_next(&grng) % (uint64_t)global_w);
@@ -109,7 +109,7 @@ void agent_decide(Agent *a, SubGrid *sg, Season season, RngState *rng,
 }
 
 void agents_workload(Agent *agents, int count, SubGrid *sg, int max_workload) {
-    #pragma omp parallel for schedule(dynamic, 32)
+    #pragma omp parallel for schedule(guided, 8)
     for (int i = 0; i < count; i++) {
         if (!agents[i].alive) continue;
 
@@ -134,7 +134,7 @@ void agents_decide_all(Agent *agents, int count, SubGrid *sg,
 #endif
         RngState rng = rng_seed(seed ^ ((uint64_t)(tid + 1) * 2654435761ULL));
 
-        #pragma omp for schedule(dynamic, 32)
+        #pragma omp for schedule(guided, 8)
         for (int i = 0; i < count; i++) {
             if (!agents[i].alive) continue;
             agent_decide(&agents[i], sg, season, &rng,
