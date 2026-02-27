@@ -81,7 +81,7 @@ A escolha de ABM — ao invés de modelos baseados em equações diferenciais ou
 Cada agente, antes de decidir sua movimentação, executa uma carga de trabalho sintética proporcional ao recurso da célula onde se encontra (`workload_compute`). Esse busy-loop tem duas finalidades:
 
 - **Simular complexidade computacional variável**: na realidade, processar decisões em áreas ricas em recursos requereria mais cálculos (mais opções, mais dados ambientais). A carga sintética reproduz essa assimetria.
-- **Criar desbalanceamento de carga**: sem ela, cada agente custaria tempo constante, e qualquer estratégia de escalonamento teria desempenho idêntico. A carga variável é o que torna `schedule(dynamic)` necessário e mensurável nos benchmarks.
+- **Criar desbalanceamento de carga**: sem ela, cada agente custaria tempo constante, e qualquer estratégia de escalonamento teria desempenho idêntico. A carga variável é o que torna o uso de escalonamentos avançados, como `schedule(guided)`, necessário e mensurável nos benchmarks.
 
 A carga é limitada por `max_workload` (padrão: 500.000 iterações) e usa `volatile` para impedir que o compilador elimine o loop como código morto.
 
@@ -91,7 +91,7 @@ A cada ciclo, a simulação executa 7 fases individualmente cronometradas:
 
 1. **Estação + Acessibilidade** (`season_time`): rank 0 calcula estação, `MPI_Bcast` para todos, loop local de acessibilidade.
 2. **Troca de halos** (`halo_time`): `MPI_Isend`/`MPI_Irecv` de 8 direções + `MPI_Waitall`.
-3. **Workload sintético** (`workload_time`): busy-loop proporcional ao recurso da célula, OpenMP `schedule(dynamic, 32)`.
+3. **Workload sintético** (`workload_time`): busy-loop proporcional ao recurso da célula, OpenMP `schedule(guided, 8)`.
 4. **Decisão dos agentes** (`agent_time`): varredura de vizinhança, seleção gulosa, desempate por reservoir sampling.
 5. **Atualização da grade** (`grid_time`): regeneração de recursos, OpenMP `collapse(2) static`.
 6. **Migração de agentes** (`migrate_time`): `MPI_Alltoallv` em duas fases (contagens + dados).
@@ -172,14 +172,14 @@ A grade é dividida em topologia cartesiana 2D (`MPI_Cart_create`), não-periód
 
 8 direções (N, S, E, W, NE, NW, SE, SW) com `MPI_Isend`/`MPI_Irecv` + `MPI_Waitall`. Um `MPI_Datatype` customizado mapeia a struct `Cell` diretamente. Bordas E/W são empacotadas manualmente (`pack_column`/`unpack_column`) por não serem contíguas em row-major.
 
-### Processamento de agentes — OpenMP `dynamic`
+### Processamento de agentes — OpenMP `guided`
 
 O processamento é dividido em duas funções independentemente cronometradas:
 
-1. **`agents_workload`** — busy-loop sintético proporcional ao recurso da célula. `schedule(dynamic, 32)` porque a carga varia de 0 a 500k iterações por agente; `static` deixaria threads desbalanceadas.
+1. **`agents_workload`** — busy-loop sintético proporcional ao recurso da célula. Utilizamos `schedule(guided, 8)` porque a carga varia de 0 a 500k iterações por agente e o escalonamento `static` deixaria as threads severamente desbalanceadas.
 2. **`agents_decide_all`** — lógica de decisão com PRNG per-thread (`seed ^ (tid * 2654435761)`). Garante determinismo e independência entre threads.
 
-Chunk size 32: trade-off entre granularidade (absorver variação de carga) e overhead (menos chamadas ao scheduler que chunk=1).
+**Otimização do Escalonamento:** A escolha por `guided, 8` otimiza o balanceamento de carga. A diretiva `guided` inicia entregando blocos (chunks) grandes para as threads e diminui o tamanho exponencialmente até o limite mínimo de 8. Isso reduz significativamente o overhead do escalonador em comparação com o modelo `dynamic`, garantindo ao mesmo tempo que as threads não fiquem ociosas (starvation) na reta final da execução do laço.
 
 ### Atualização da grade — `collapse(2) static`
 
@@ -241,7 +241,7 @@ O modo `--csv` produz 16 colunas por ciclo:
 
 A instrumentação granular (7 fases por ciclo) permite identificar exatamente onde o tempo é gasto. Os principais achados:
 
-**Workload domina compute (~99%)** — a carga sintética (`workload_compute`) é responsável por quase todo o tempo de ciclo no baseline serial. Isso valida o design: o `schedule(dynamic, 32)` é essencial e mensurável.
+**Workload domina compute (~99%)** — a carga sintética `(workload_compute)` é responsável por quase todo o tempo de ciclo no baseline serial. Isso valida o design e as otimizações: a escolha fina da política de escalonamento, comprovada pela troca para `schedule(guided, 8)`, é essencial para extrair desempenho e reduzir o overhead, sendo seu impacto diretamente mensurável.
 
 **Workload escala bem com threads** — por ser embaraçosamente paralelo (sem estado compartilhado), o workload atinge ~1.95× com 2 threads e ~3.6× com 4 threads.
 
